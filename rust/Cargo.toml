@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "beads-core",
+    "beads-cli",
+]
+resolver = "2"
