@@ -1,6 +1,6 @@
 use crate::{Store, Git};
 use crate::merge::merge3way;
-use anyhow::{Result, Context};
+use anyhow::{Result, Context, bail};
 use std::path::Path;
 use std::fs;
 
@@ -22,14 +22,26 @@ pub fn run_sync(store: &mut Store, git_root: &Path, jsonl_path: &Path) -> Result
     if let Err(e) = git.pull_rebase() {
         // Check for conflict
         let status = git.status()?;
-        // Check if issues.jsonl is in conflict (UU = both modified)
-        if status.contains("UU") && status.contains("issues.jsonl") {
-            tracing::info!("Conflict detected on issues.jsonl. Attempting merge...");
 
-            // Extract versions
-            // Assuming jsonl_path is relative to git root or we know the relative path
-            // For now, hardcode .beads/issues.jsonl which is the standard
-            let rel_path = ".beads/issues.jsonl";
+        // Calculate relative path for git show
+        let rel_path = match jsonl_path.strip_prefix(git_root) {
+            // Git expects forward slashes even on Windows
+            Ok(p) => p.to_string_lossy().replace('\\', "/"),
+            Err(_) => {
+                // If jsonl_path is not under git_root, we can't easily resolve the git path.
+                // Assuming jsonl_path is absolute or relative to CWD, and git_root is also.
+                // If they are separate trees, we have a problem.
+                // Let's try to canonicalize both first?
+                // For now, if strip_prefix fails, we assume the user provided path is what git knows
+                // if they are running from git root.
+                // But safer is to bail or try just the filename if it's in root.
+                 bail!("Could not determine relative path of {:?} to git root {:?}", jsonl_path, git_root);
+            }
+        };
+
+        // Check if issues.jsonl is in conflict (UU = both modified)
+        if status.contains("UU") && status.contains(&rel_path) {
+            tracing::info!("Conflict detected on {}. Attempting merge...", rel_path);
 
             let base_content = git.show(&format!(":1:{}", rel_path))?;
             let left_content = git.show(&format!(":2:{}", rel_path))?;

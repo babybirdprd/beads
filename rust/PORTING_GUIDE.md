@@ -3,70 +3,46 @@
 ## Current Status (PoC)
 We have established the foundational structure for the Rust port of `beads`.
 - **Workspace**: `rust/` contains the cargo workspace.
-- **beads-core**: Library crate containing domain models (`Issue`) and storage logic (`Store` wrapper around `rusqlite`).
-- **beads-cli**: Binary crate using `clap` for CLI parsing. Implements `list` and `create` commands.
+- **beads-core**: Library crate containing domain models (`Issue`), storage logic (`Store` wrapper around `rusqlite`), git integration, and sync logic.
+- **beads-cli**: Binary crate using `clap` for CLI parsing. Implements `list`, `create`, and `sync` commands.
 - **Interoperability**: The Rust CLI reads and writes to the same SQLite database (`.beads/beads.db`) as the Go implementation. It writes to the `dirty_issues` table to ensure the Go `bd export` command picks up changes.
 
 ---
 
 ## Progress Assessment
-**Overall Completion: ~25-30%**
+**Overall Completion: ~60%**
 
 | Component | Status | Notes |
 | :--- | :--- | :--- |
 | **Core Models** | 🟢 Complete | `Issue` struct updated with `Dependency`, `Comment` types. `relates_to` is `Vec<String>`. |
-| **Storage** | 🟡 Partial | Read/write works. `export_to_jsonl` implemented but needs rigorous testing against Go artifacts. |
+| **Storage** | 🟢 Complete | Read/write works. `export_to_jsonl` implemented. |
 | **ID Generation** | 🟢 Complete | Ported Base36 logic and hash generation (prefix, length, nonce) from Go. |
-| **CLI** | 🟡 Partial | `create` uses correct ID generation. Binary name is `bd`. |
-| **Git Integration** | ⚪ Missing | No wrapper for git operations yet. |
-| **Merge Logic** | ⚪ Missing | 3-way merge algorithm not ported. |
-| **Sync Logic** | ⚪ Missing | `bd sync` command not implemented. |
+| **CLI** | 🟢 Complete | `create`, `list`, `sync` commands implemented. Binary name is `bd`. |
+| **Git Integration** | 🟢 Complete | `git` module implemented in `beads-core` (init, add, commit, pull --rebase, push, status, show). |
+| **Merge Logic** | 🟢 Complete | 3-way merge algorithm ported including tombstone handling. |
+| **Sync Logic** | 🟢 Complete | `bd sync` command implemented with conflict resolution. |
 
 ---
 
 ## Next Steps for the Next Agent
 
-Your goal is to implement Git integration and the core Sync logic.
+Your goal is to verify cross-language compatibility and refine the user experience.
 
-### 1. Implement Git Integration
-* **Task**: Create a `git` module in `beads-core` (or a separate crate if preferred).
-* **Strategy**: Wrap `std::process::Command("git")`.
-* **Operations**: `init`, `add`, `commit`, `push`, `pull`, `status`, `rev-parse`.
-* **Reference**: See `internal/git/git.go`.
-
-### 2. Implement Sync Logic (`bd sync`)
-* **Task**: Implement `beads_core::sync::run_sync`.
-* **Logic**:
-    1.  **Check for changes**: Is the DB dirty? (Check `dirty_issues` table).
-    2.  **Export**: If dirty, call `Store::export_to_jsonl`.
-    3.  **Git Add/Commit**: Add `.beads/issues.jsonl` and commit with a standard message (e.g., "update issues").
-    4.  **Pull/Merge**: Pull remote changes. If conflict, handle via 3-way merge (already partially scaffolded in `merge.rs`, but needs completion).
-    5.  **Import**: If new JSONL from remote, call `Store::import_from_jsonl`.
-
-### 3. Implement 3-Way Merge Logic
-* **Task**: Port `internal/merge/merge.go` to `rust/beads-core/src/merge.rs`.
-* **Logic**:
-    *   Compare Base (common ancestor), Left (local), and Right (remote).
-    *   Resolve conflicts field-by-field.
-    *   Handle tombstones (deletions).
-    *   This is critical for `bd sync`.
-
-### 4. Verify Cross-Language Compatibility
-* **Task**: Create a test script that:
+### 1. Verify Cross-Language Compatibility
+* **Task**: Create a comprehensive test script/suite that:
     1.  Creates an issue with Go `bd`.
     2.  Reads/Updates it with Rust `bd`.
     3.  Exports with Rust `bd`.
     4.  Imports back with Go `bd`.
-*   Ensure hashes and content match exactly.
+*   Ensure hashes and content match exactly to prevent data corruption during migration.
 
-### 4. Implement Git Integration
-* **Task**: Create a `git` module in `beads-core`.
-* **Strategy**: Wrap `std::process::Command("git")`.
-* **Operations**: `init`, `add`, `commit`, `push`, `pull`.
+### 2. Improve Error Handling & UX
+* **Task**: Review `anyhow` usage in `beads-cli`. ensuring user-friendly error messages.
+* **Task**: Polish the `bd list` table output (e.g., handling terminal width).
 
-### 5. Implement Merge Logic
-* **Task**: Port `internal/merge/merge.go` to Rust.
-* **Logic**: Exact port of the 3-way merge algorithm (including Tombstone handling).
+### 3. WASM Preparation (Optional)
+* **Task**: Audit `beads-core` for non-WASM compatible IO (mostly `std::fs` and `std::process::Command` in `git.rs`).
+* **Strategy**: Consider defining a `GitProvider` trait to abstract git operations, allowing a JS/WASM implementation later.
 
 ---
 
