@@ -1,4 +1,4 @@
-use beads_core::{Store, Issue, Dependency, Comment};
+use beads_core::{Store, Issue, Dependency, Comment, StdFileSystem};
 use std::fs;
 use chrono::Utc;
 
@@ -67,7 +67,8 @@ fn test_export_to_jsonl() -> anyhow::Result<()> {
 
     // Run Export
     let jsonl_path = dir.join("issues.jsonl");
-    store.export_to_jsonl(&jsonl_path)?;
+    let fs_impl = StdFileSystem;
+    store.export_to_jsonl(&jsonl_path, &fs_impl)?;
 
     // Verify JSONL
     let content = fs::read_to_string(&jsonl_path)?;

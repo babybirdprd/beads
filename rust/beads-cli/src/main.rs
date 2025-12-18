@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use beads_core::{Store, Issue};
+use beads_core::{Store, Issue, StdFileSystem};
 use chrono::Utc;
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
@@ -318,15 +318,18 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Export { output } => {
-            store.export_to_jsonl(&output).context(format!("Failed to export issues to {}", output))?;
+            let fs = StdFileSystem;
+            store.export_to_jsonl(&output, &fs).context(format!("Failed to export issues to {}", output))?;
             println!("Exported issues to {}", output);
         }
         Commands::Import { input } => {
-            store.import_from_jsonl(&input).context(format!("Failed to import issues from {}", input))?;
+            let fs = StdFileSystem;
+            store.import_from_jsonl(&input, &fs).context(format!("Failed to import issues from {}", input))?;
             println!("Imported issues from {}", input);
         }
         Commands::Merge { output, base, left, right, debug } => {
-            beads_core::merge::merge3way(&output, &base, &left, &right, debug)?;
+            let fs = StdFileSystem;
+            beads_core::merge::merge3way(&output, &base, &left, &right, debug, &fs)?;
         }
         Commands::Onboard => {
             // Check git init
@@ -458,7 +461,8 @@ fn main() -> anyhow::Result<()> {
             let git_root = beads_dir.parent().unwrap_or(std::path::Path::new("."));
             let git = beads_core::StdGit::new(git_root);
             let jsonl_path = beads_dir.join("issues.jsonl");
-            beads_core::sync::run_sync(&mut store, &git, git_root, &jsonl_path).context("Sync failed")?;
+            let fs = StdFileSystem;
+            beads_core::sync::run_sync(&mut store, &git, git_root, &jsonl_path, &fs).context("Sync failed")?;
             println!("Sync complete.");
         }
         Commands::Config { command } => match command {
