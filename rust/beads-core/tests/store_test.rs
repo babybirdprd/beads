@@ -14,23 +14,7 @@ fn test_export_to_jsonl() -> anyhow::Result<()> {
 
     let store = Store::open(&db_path)?;
 
-    // Init Schema
-    store.execute_raw(r#"
-        CREATE TABLE issues (
-            id TEXT PRIMARY KEY, content_hash TEXT, title TEXT, description TEXT,
-            design TEXT, acceptance_criteria TEXT, notes TEXT, status TEXT,
-            priority INTEGER, issue_type TEXT, assignee TEXT, estimated_minutes INTEGER,
-            created_at DATETIME, updated_at DATETIME, closed_at DATETIME,
-            external_ref TEXT, sender TEXT, ephemeral INTEGER, replies_to TEXT,
-            relates_to TEXT, duplicate_of TEXT, superseded_by TEXT,
-            deleted_at DATETIME, deleted_by TEXT, delete_reason TEXT, original_type TEXT
-        );
-        CREATE TABLE labels (issue_id TEXT, label TEXT);
-        CREATE TABLE dependencies (issue_id TEXT, depends_on_id TEXT, type TEXT, created_at DATETIME, created_by TEXT);
-        CREATE TABLE comments (id INTEGER PRIMARY KEY, issue_id TEXT, author TEXT, text TEXT, created_at DATETIME);
-        CREATE TABLE dirty_issues (issue_id TEXT);
-        CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT);
-    "#)?;
+    // Init Schema (Handled by Store::open)
 
     // Insert test data
     let now = Utc::now();

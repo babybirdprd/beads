@@ -4,7 +4,7 @@ use anyhow::{Result, Context};
 use std::path::Path;
 use std::fs;
 
-pub fn run_sync(store: &Store, git_root: &Path, jsonl_path: &Path) -> Result<()> {
+pub fn run_sync(store: &mut Store, git_root: &Path, jsonl_path: &Path) -> Result<()> {
     let git = Git::new(git_root);
 
     // 1. Export
@@ -24,7 +24,7 @@ pub fn run_sync(store: &Store, git_root: &Path, jsonl_path: &Path) -> Result<()>
         let status = git.status()?;
         // Check if issues.jsonl is in conflict (UU = both modified)
         if status.contains("UU") && status.contains("issues.jsonl") {
-            println!("Conflict detected on issues.jsonl. Attempting merge...");
+            tracing::info!("Conflict detected on issues.jsonl. Attempting merge...");
 
             // Extract versions
             // Assuming jsonl_path is relative to git root or we know the relative path
@@ -59,7 +59,7 @@ pub fn run_sync(store: &Store, git_root: &Path, jsonl_path: &Path) -> Result<()>
             git.add(jsonl_path)?;
             git.rebase_continue()?;
 
-            println!("Merge resolved.");
+            tracing::info!("Merge resolved.");
         } else {
             // Re-throw original error if not our specific conflict
             return Err(e);
@@ -68,6 +68,9 @@ pub fn run_sync(store: &Store, git_root: &Path, jsonl_path: &Path) -> Result<()>
 
     // 5. Push
     git.push().context("Git push failed")?;
+
+    // 6. Import changes from JSONL back to DB
+    store.import_from_jsonl(jsonl_path).context("Import failed")?;
 
     Ok(())
 }

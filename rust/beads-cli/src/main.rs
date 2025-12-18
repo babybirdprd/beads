@@ -27,6 +27,10 @@ enum Commands {
         #[arg(short, long, default_value = ".beads/issues.jsonl")]
         output: String,
     },
+    Import {
+        #[arg(short, long, default_value = ".beads/issues.jsonl")]
+        input: String,
+    },
     Merge {
         output: String,
         base: String,
@@ -36,9 +40,21 @@ enum Commands {
         debug: bool,
     },
     Sync,
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    Set { key: String, value: String },
+    Get { key: String },
+    List,
 }
 
 fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
     // Find DB
@@ -58,7 +74,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    let store = Store::open(&db_path).map_err(|e| anyhow::anyhow!("Failed to open DB at {:?}: {}", db_path, e))?;
+    let mut store = Store::open(&db_path).map_err(|e| anyhow::anyhow!("Failed to open DB at {:?}: {}", db_path, e))?;
 
     match cli.command {
         Commands::List => {
@@ -79,6 +95,10 @@ fn main() -> anyhow::Result<()> {
             // But helpful feedback is good.
             println!("Exported issues to {}", output);
         }
+        Commands::Import { input } => {
+            store.import_from_jsonl(&input)?;
+            println!("Imported issues from {}", input);
+        }
         Commands::Merge { output, base, left, right, debug } => {
             beads_core::merge::merge3way(&output, &base, &left, &right, debug)?;
         }
@@ -86,9 +106,28 @@ fn main() -> anyhow::Result<()> {
             let beads_dir = db_path.parent().unwrap();
             let git_root = beads_dir.parent().unwrap_or(std::path::Path::new("."));
             let jsonl_path = beads_dir.join("issues.jsonl");
-            beads_core::sync::run_sync(&store, git_root, &jsonl_path)?;
+            beads_core::sync::run_sync(&mut store, git_root, &jsonl_path)?;
             println!("Sync complete.");
         }
+        Commands::Config { command } => match command {
+            ConfigCommands::Set { key, value } => {
+                store.set_config(&key, &value)?;
+                println!("{} = {}", key, value);
+            }
+            ConfigCommands::Get { key } => {
+                if let Some(val) = store.get_config(&key)? {
+                    println!("{}", val);
+                } else {
+                    eprintln!("Key not found: {}", key);
+                }
+            }
+            ConfigCommands::List => {
+                let items = store.list_config()?;
+                for (k, v) in items {
+                    println!("{} = {}", k, v);
+                }
+            }
+        },
         Commands::Create { title, description, type_, priority } => {
             let now = Utc::now();
             // TODO: Real workspace ID from config

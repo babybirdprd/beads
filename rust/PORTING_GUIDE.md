@@ -1,43 +1,36 @@
 # Rust Porting Guide
 
-## Current Status (Sync & Export Implemented)
-We have achieved the first major milestone: **Sync & Export**.
+## Current Status (Sync, Export, Import, Config Implemented)
+We have achieved the major milestones: **Sync, Export, Import, Config**.
 - **beads-core**:
-    - `Store::export_to_jsonl` implements full-fidelity export (including labels, dependencies, comments, tombstones).
-    - `merge` module ports the Go 3-way merge logic exactly.
-    - `git` module wraps git commands.
-    - `sync` module orchestrates the sync workflow (Export -> Commit -> Pull Rebase -> Merge -> Push).
-    - `Issue` struct matches Go's JSON schema (Base36 IDs, `Vec<String>` for `relates_to`).
+    - `Store::import_from_jsonl` implements strict sync (clearing child tables to match JSONL source of truth).
+    - `Store` schema initialization is handled in `open()`.
+    - `merge` module has unit tests covering conflicts and tombstones.
+    - `tracing` is used for logging.
 - **beads-cli** (binary `bd`):
-    - Implements `sync`, `export`, `merge` (merge driver), `list`, `create`.
-    - Renamed to `bd` in Cargo.toml.
+    - Implements `sync`, `export`, `import`, `list`, `create`, `config`, `merge`.
+    - `bd config` manages key-value pairs in SQLite.
 
 ## Continuation Prompt / Next Steps
 
-Your goal is to complete the "Import" side of the equation and robustify the CLI.
+Your goal is to implement the user-facing issue management commands to reach feature parity with the Go tool's daily workflow.
 
-### 1. Implement JSONL Import
-Currently, `bd sync` pulls changes but does **not** import them into the local SQLite database.
-- **Task**: Implement `Store::import_from_jsonl(path)` in `beads-core`.
-- **Logic**: Read JSONL, upsert issues into SQLite (`INSERT OR REPLACE` or smart update). Handle deletions (tombstones).
-- **Reference**: See `cmd/bd/import.go` and `internal/importer` in Go.
-- **Integration**: Update `beads-core::sync::run_sync` to call `import_from_jsonl` after `git.pull_rebase` (and after merge resolution).
+### 1. Implement Issue Management Commands
+The CLI lacks commands for viewing and modifying existing issues.
+- **Task**: Implement `bd show <id>`, `bd update <id>`, `bd close <id>`.
+- **Logic**:
+    - `show`: Fetch issue by ID (or short hash) and display details (including comments/deps).
+    - `update`: Modify fields (title, desc, status, etc.). Ensure update marks as dirty so it exports.
+    - `close`: Shortcut for update status=closed.
+- **Reference**: See `cmd/bd/show.go`, `cmd/bd/update.go` in Go.
 
-### 2. Add Unit Tests for Merge Logic
-The `merge` logic is ported but lacks granular unit tests.
-- **Task**: Add tests in `rust/beads-core/src/merge.rs` covering:
-    - Conflict resolution (Closed vs Open, Priority).
-    - Tombstone handling (expiry, resurrection).
-    - 3-way merge scenarios.
+### 2. Implement `bd ready` and Filtering
+`bd list` currently dumps everything.
+- **Task**: Implement `bd list --status <status> --assignee <user>` filtering.
+- **Task**: Implement `bd ready` (alias for listing open issues assigned to user or unassigned?).
 
-### 3. Implement Config Command
-The CLI currently has hardcoded defaults or simple paths.
-- **Task**: Implement `bd config` to read/write `.beads/config` (or SQLite `config` table).
-- **Goal**: Support `user.email`, `sync.remote`, etc.
-
-### 4. Improve Error Handling & Logging
-- Use `tracing` or `log` crate instead of `println!`.
-- Refine error types in `beads-core`.
+### 3. Implement `bd onboard`
+- **Task**: Create a wizard to set up `.beads` repo, git config, and initial user config.
 
 ## Architecture Notes
 - **No Daemon**: We are intentionally dropping the Daemon/RPC architecture. Use SQLite file locking for concurrency safety.
