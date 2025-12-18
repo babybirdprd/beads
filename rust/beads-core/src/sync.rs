@@ -1,12 +1,12 @@
 use crate::{Store, GitOps};
+use crate::fs::{FileSystem, StdFileSystem};
 use crate::merge::merge3way;
 use anyhow::{Result, Context, bail};
 use std::path::Path;
-use std::fs;
 
-pub fn run_sync(store: &mut Store, git: &impl GitOps, git_root: &Path, jsonl_path: &Path) -> Result<()> {
+pub fn run_sync(store: &mut Store, git: &impl GitOps, git_root: &Path, jsonl_path: &Path, fs: &impl FileSystem) -> Result<()> {
     // 1. Export
-    store.export_to_jsonl(jsonl_path).context("Export failed")?;
+    store.export_to_jsonl(jsonl_path, fs).context("Export failed")?;
 
     // 2. Git Add
     git.add(jsonl_path).context("Git add failed")?;
@@ -52,9 +52,9 @@ pub fn run_sync(store: &mut Store, git: &impl GitOps, git_root: &Path, jsonl_pat
                 let left_path = temp_dir.join("left.jsonl");
                 let right_path = temp_dir.join("right.jsonl");
 
-                fs::write(&base_path, base_content)?;
-                fs::write(&left_path, left_content)?;
-                fs::write(&right_path, right_content)?;
+                fs.write(&base_path, base_content.as_bytes())?;
+                fs.write(&left_path, left_content.as_bytes())?;
+                fs.write(&right_path, right_content.as_bytes())?;
 
                 // Run merge
                 // Output directly to jsonl_path (overwriting conflict markers)
@@ -63,7 +63,8 @@ pub fn run_sync(store: &mut Store, git: &impl GitOps, git_root: &Path, jsonl_pat
                     base_path.to_str().unwrap(),
                     left_path.to_str().unwrap(),
                     right_path.to_str().unwrap(),
-                    false
+                    false,
+                    fs
                 )?;
 
                 // Add and continue
@@ -84,7 +85,7 @@ pub fn run_sync(store: &mut Store, git: &impl GitOps, git_root: &Path, jsonl_pat
     }
 
     // 6. Import changes from JSONL back to DB
-    store.import_from_jsonl(jsonl_path).context("Import failed")?;
+    store.import_from_jsonl(jsonl_path, fs).context("Import failed")?;
 
     Ok(())
 }

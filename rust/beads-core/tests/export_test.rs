@@ -1,5 +1,5 @@
 
-use beads_core::{Store, Issue, Comment};
+use beads_core::{Store, Issue, Comment, StdFileSystem};
 use chrono::Utc;
 use tempfile::tempdir;
 
@@ -35,7 +35,8 @@ fn test_export_to_jsonl() -> anyhow::Result<()> {
     store.create_issue(&issue)?;
 
     let jsonl_path = dir.path().join("issues.jsonl");
-    store.export_to_jsonl(&jsonl_path)?;
+    let fs = StdFileSystem;
+    store.export_to_jsonl(&jsonl_path, &fs)?;
 
     let content = std::fs::read_to_string(&jsonl_path)?;
     assert!(content.contains("\"id\":\"bd-test1\""));

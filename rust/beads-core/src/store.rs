@@ -1,9 +1,9 @@
 use rusqlite::{Connection, Result, params};
 use crate::models::{Issue, Dependency, Comment};
+use crate::fs::FileSystem;
 use chrono::{DateTime, Utc, NaiveDateTime};
 use std::path::Path;
 use std::collections::HashMap;
-use std::fs::File;
 use std::io::{BufRead, BufWriter, Write};
 use sha2::{Digest, Sha256};
 use crate::util;
@@ -420,14 +420,13 @@ impl Store {
         Ok(issues)
     }
 
-    pub fn import_from_jsonl<P: AsRef<Path>>(&mut self, jsonl_path: P) -> anyhow::Result<()> {
+    pub fn import_from_jsonl<P: AsRef<Path>>(&mut self, jsonl_path: P, fs: &impl FileSystem) -> anyhow::Result<()> {
         let jsonl_path = jsonl_path.as_ref();
-        if !jsonl_path.exists() {
+        if !fs.exists(jsonl_path) {
             return Ok(());
         }
 
-        let file = File::open(jsonl_path)?;
-        let reader = std::io::BufReader::new(file);
+        let reader = fs.open_read(jsonl_path)?;
 
         let tx = self.conn.transaction()?;
 
@@ -615,7 +614,7 @@ impl Store {
         Ok(())
     }
 
-    pub fn export_to_jsonl<P: AsRef<Path>>(&self, jsonl_path: P) -> anyhow::Result<()> {
+    pub fn export_to_jsonl<P: AsRef<Path>>(&self, jsonl_path: P, fs: &impl FileSystem) -> anyhow::Result<()> {
         let issues = self.export_all_issues()?;
         let jsonl_path = jsonl_path.as_ref();
 
@@ -625,7 +624,7 @@ impl Store {
         let temp_path = dir.join(format!(".{}.tmp", file_name.to_string_lossy()));
 
         {
-            let file = File::create(&temp_path)?;
+            let file = fs.open_write(&temp_path)?;
             let mut writer = BufWriter::new(file);
 
             for issue in &issues {
@@ -636,12 +635,12 @@ impl Store {
         } // file closed here
 
         // Rename temp file to target
-        std::fs::rename(&temp_path, jsonl_path)?;
+        fs.rename(&temp_path, jsonl_path)?;
 
         // Compute hash of the new file
-        let mut file = File::open(jsonl_path)?;
+        let mut reader = fs.open_read(jsonl_path)?;
         let mut hasher = Sha256::new();
-        std::io::copy(&mut file, &mut hasher)?;
+        std::io::copy(&mut reader, &mut hasher)?;
         let hash = hex::encode(hasher.finalize());
 
         // Update metadata and clear dirty

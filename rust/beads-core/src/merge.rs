@@ -1,9 +1,10 @@
 use anyhow::{Result, Context};
 use crate::models::{Issue, Dependency, Comment};
-use std::fs::File;
-use std::io::{BufReader, BufWriter, BufRead, Write};
+use crate::fs::FileSystem;
+use std::io::{BufWriter, BufRead, Write};
 use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc, Duration};
+use std::path::Path;
 
 const STATUS_TOMBSTONE: &str = "tombstone";
 const STATUS_CLOSED: &str = "closed";
@@ -30,7 +31,7 @@ struct IssueKey {
                     // So models::Issue::sender is the one.
 }
 
-pub fn merge3way(output_path: &str, base_path: &str, left_path: &str, right_path: &str, debug: bool) -> Result<()> {
+pub fn merge3way(output_path: &str, base_path: &str, left_path: &str, right_path: &str, debug: bool, fs: &impl FileSystem) -> Result<()> {
     if debug {
         eprintln!("=== DEBUG MODE ===");
         eprintln!("Output path: {}", output_path);
@@ -40,9 +41,9 @@ pub fn merge3way(output_path: &str, base_path: &str, left_path: &str, right_path
         eprintln!();
     }
 
-    let base_issues = read_issues(base_path)?;
-    let left_issues = read_issues(left_path)?;
-    let right_issues = read_issues(right_path)?;
+    let base_issues = read_issues(base_path, fs)?;
+    let left_issues = read_issues(left_path, fs)?;
+    let right_issues = read_issues(right_path, fs)?;
 
     if debug {
         eprintln!("Base issues read: {}", base_issues.len());
@@ -61,7 +62,7 @@ pub fn merge3way(output_path: &str, base_path: &str, left_path: &str, right_path
     }
 
     // Write output
-    let file = File::create(output_path).context("Failed to create output file")?;
+    let file = fs.open_write(Path::new(output_path)).context("Failed to create output file")?;
     let mut writer = BufWriter::new(file);
 
     for issue in result {
@@ -80,9 +81,8 @@ pub fn merge3way(output_path: &str, base_path: &str, left_path: &str, right_path
     Ok(())
 }
 
-fn read_issues(path: &str) -> Result<Vec<Issue>> {
-    let file = File::open(path).context(format!("Failed to open file: {}", path))?;
-    let reader = BufReader::new(file);
+fn read_issues(path: &str, fs: &impl FileSystem) -> Result<Vec<Issue>> {
+    let reader = fs.open_read(Path::new(path)).context(format!("Failed to open file: {}", path))?;
     let mut issues = Vec::new();
 
     for line in reader.lines() {
