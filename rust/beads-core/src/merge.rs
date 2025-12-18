@@ -1,6 +1,5 @@
 use anyhow::{Result, Context};
-use crate::models::{Issue, Dependency, Comment, Status};
-use std::path::Path;
+use crate::models::{Issue, Dependency, Comment};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, BufRead, Write};
 use std::collections::{HashMap, HashSet};
@@ -8,7 +7,6 @@ use chrono::{DateTime, Utc, Duration};
 
 const STATUS_TOMBSTONE: &str = "tombstone";
 const STATUS_CLOSED: &str = "closed";
-const STATUS_OPEN: &str = "open";
 
 // Constants from Go implementation
 const DEFAULT_TOMBSTONE_TTL_DAYS: i64 = 30;
@@ -340,6 +338,8 @@ fn merge_issue(base: Issue, left: Issue, right: Issue) -> (Issue, String) {
     }
 
     result.dependencies = merge_dependencies(&left.dependencies, &right.dependencies);
+    result.labels = merge_labels(&left.labels, &right.labels);
+    result.comments = merge_comments(&left.comments, &right.comments);
 
     // Copy tombstone fields if status became tombstone
     if result.status == STATUS_TOMBSTONE {
@@ -461,4 +461,138 @@ fn merge_dependencies(left: &[Dependency], right: &[Dependency]) -> Vec<Dependen
         }
     }
     result
+}
+
+fn merge_labels(left: &[String], right: &[String]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+
+    for label in left.iter().chain(right.iter()) {
+        if !seen.contains(label) {
+            seen.insert(label.clone());
+            result.push(label.clone());
+        }
+    }
+    result
+}
+
+fn merge_comments(left: &[Comment], right: &[Comment]) -> Vec<Comment> {
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+
+    for c in left.iter().chain(right.iter()) {
+        // Key by author + text (approximate deduping)
+        // We ignore timestamp for deduping to handle slight skews or edits?
+        // Go uses author+text.
+        let key = format!("{}:{}", c.author, c.text);
+        if !seen.contains(&key) {
+            seen.insert(key);
+            result.push(c.clone());
+        }
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn create_issue(id: &str, title: &str, updated_at: i64) -> Issue {
+        Issue {
+            id: id.to_string(),
+            content_hash: String::new(),
+            title: title.to_string(),
+            description: "desc".to_string(),
+            design: String::new(),
+            acceptance_criteria: String::new(),
+            notes: String::new(),
+            status: "open".to_string(),
+            priority: 0,
+            issue_type: "bug".to_string(),
+            assignee: None,
+            estimated_minutes: None,
+            created_at: Utc.timestamp_opt(1000, 0).unwrap(),
+            updated_at: Utc.timestamp_opt(updated_at, 0).unwrap(),
+            closed_at: None,
+            external_ref: None,
+            sender: "user".to_string(),
+            ephemeral: false,
+            replies_to: String::new(),
+            relates_to: Vec::new(),
+            duplicate_of: String::new(),
+            superseded_by: String::new(),
+            deleted_at: None,
+            deleted_by: String::new(),
+            delete_reason: String::new(),
+            original_type: String::new(),
+            labels: Vec::new(),
+            dependencies: Vec::new(),
+            comments: Vec::new(),
+        }
+    }
+
+    fn create_tombstone(id: &str, deleted_at: i64) -> Issue {
+        let mut issue = create_issue(id, "deleted", deleted_at);
+        issue.status = STATUS_TOMBSTONE.to_string();
+        issue.deleted_at = Some(Utc.timestamp_opt(deleted_at, 0).unwrap());
+        issue
+    }
+
+    #[test]
+    fn test_merge_no_conflict() {
+        let now = Utc::now().timestamp();
+        let base = create_issue("1", "Base Title", now - 200);
+        let left = create_issue("1", "Left Title", now - 100);
+        let right = create_issue("1", "Base Title", now - 200);
+
+        let (result, conflicts) = merge_logic(vec![base], vec![left], vec![right]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "Left Title");
+        assert!(conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_merge_conflict_latest_wins() {
+        let now = Utc::now().timestamp();
+        let base = create_issue("1", "Base Title", now - 300);
+        let left = create_issue("1", "Left Title", now - 200);
+        let right = create_issue("1", "Right Title", now - 100);
+
+        let (result, conflicts) = merge_logic(vec![base], vec![left], vec![right]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].title, "Right Title");
+        assert!(conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_merge_tombstone_wins_over_edit() {
+        let now = Utc::now().timestamp();
+        let base = create_issue("1", "Base Title", now - 300);
+        let left = create_tombstone("1", now - 200);
+        let right = create_issue("1", "Right Title", now - 100);
+
+        let (result, conflicts) = merge_logic(vec![base], vec![left], vec![right]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].status, STATUS_TOMBSTONE);
+        assert!(conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_merge_3way_additions() {
+        let now = Utc::now().timestamp();
+        let base = vec![];
+        let left = vec![create_issue("L1", "Left Only", now)];
+        let right = vec![create_issue("R1", "Right Only", now)];
+
+        let (result, conflicts) = merge_logic(base, left, right);
+        assert_eq!(result.len(), 2);
+
+        let mut sorted = result;
+        sorted.sort_by(|a, b| a.id.cmp(&b.id));
+
+        assert_eq!(sorted[0].id, "L1");
+        assert_eq!(sorted[1].id, "R1");
+        assert!(conflicts.is_empty());
+    }
 }

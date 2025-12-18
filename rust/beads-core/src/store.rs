@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc, NaiveDateTime};
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufWriter, Write};
 use sha2::{Digest, Sha256};
 
 pub struct Store {
@@ -15,10 +15,112 @@ pub struct Store {
 impl Store {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let conn = Connection::open(&path)?;
+
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS issues (
+                id TEXT PRIMARY KEY,
+                content_hash TEXT DEFAULT '',
+                title TEXT,
+                description TEXT,
+                design TEXT DEFAULT '',
+                acceptance_criteria TEXT DEFAULT '',
+                notes TEXT DEFAULT '',
+                status TEXT,
+                priority INTEGER,
+                issue_type TEXT,
+                assignee TEXT,
+                estimated_minutes INTEGER,
+                created_at TEXT,
+                updated_at TEXT,
+                closed_at TEXT,
+                external_ref TEXT,
+                sender TEXT DEFAULT '',
+                ephemeral BOOLEAN DEFAULT 0,
+                replies_to TEXT DEFAULT '',
+                relates_to TEXT DEFAULT '',
+                duplicate_of TEXT DEFAULT '',
+                superseded_by TEXT DEFAULT '',
+                deleted_at TEXT,
+                deleted_by TEXT DEFAULT '',
+                delete_reason TEXT DEFAULT '',
+                original_type TEXT DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS labels (
+                issue_id TEXT,
+                label TEXT,
+                PRIMARY KEY (issue_id, label)
+            );
+
+            CREATE TABLE IF NOT EXISTS dependencies (
+                issue_id TEXT,
+                depends_on_id TEXT,
+                type TEXT,
+                created_at TEXT,
+                created_by TEXT,
+                PRIMARY KEY (issue_id, depends_on_id, type)
+            );
+
+            CREATE TABLE IF NOT EXISTS comments (
+                id INTEGER PRIMARY KEY,
+                issue_id TEXT,
+                author TEXT,
+                text TEXT,
+                created_at TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS dirty_issues (
+                issue_id TEXT PRIMARY KEY
+            );
+
+            CREATE TABLE IF NOT EXISTS metadata (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS config (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );
+            "
+        )?;
+
         Ok(Store {
             conn,
             db_path: path.as_ref().to_path_buf(),
         })
+    }
+
+    pub fn get_config(&self, key: &str) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare("SELECT value FROM config WHERE key = ?1")?;
+        let mut rows = stmt.query([key])?;
+        if let Some(row) = rows.next()? {
+            Ok(Some(row.get(0)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO config (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_config(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self.conn.prepare("SELECT key, value FROM config ORDER BY key")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })?;
+
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row?);
+        }
+        Ok(result)
     }
 
     pub fn execute_raw(&self, sql: &str) -> Result<()> {
@@ -79,6 +181,105 @@ impl Store {
             issues.push(issue?);
         }
         Ok(issues)
+    }
+
+    pub fn import_from_jsonl<P: AsRef<Path>>(&mut self, jsonl_path: P) -> anyhow::Result<()> {
+        let jsonl_path = jsonl_path.as_ref();
+        if !jsonl_path.exists() {
+            return Ok(());
+        }
+
+        let file = File::open(jsonl_path)?;
+        let reader = std::io::BufReader::new(file);
+
+        let tx = self.conn.transaction()?;
+
+        for line in reader.lines() {
+            let line = line?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let issue: Issue = serde_json::from_str(&line)?;
+
+            // Serialize nested fields
+            let relates_to_json = serde_json::to_string(&issue.relates_to).unwrap_or_default();
+
+            tx.execute(
+                "INSERT OR REPLACE INTO issues (
+                    id, title, description, status, priority, issue_type,
+                    created_at, updated_at, closed_at, external_ref,
+                    sender, ephemeral, replies_to, relates_to, duplicate_of, superseded_by,
+                    deleted_at, deleted_by, delete_reason, original_type
+                )
+                 VALUES (
+                    ?1, ?2, ?3, ?4, ?5, ?6,
+                    ?7, ?8, ?9, ?10,
+                    ?11, ?12, ?13, ?14, ?15, ?16,
+                    ?17, ?18, ?19, ?20
+                )",
+                params![
+                    &issue.id,
+                    &issue.title,
+                    &issue.description,
+                    &issue.status,
+                    &issue.priority,
+                    &issue.issue_type,
+                    issue.created_at.to_rfc3339(),
+                    issue.updated_at.to_rfc3339(),
+                    issue.closed_at.map(|t| t.to_rfc3339()),
+                    &issue.external_ref,
+                    &issue.sender,
+                    issue.ephemeral,
+                    &issue.replies_to,
+                    relates_to_json,
+                    &issue.duplicate_of,
+                    &issue.superseded_by,
+                    issue.deleted_at.map(|t| t.to_rfc3339()),
+                    &issue.deleted_by,
+                    &issue.delete_reason,
+                    &issue.original_type,
+                ],
+            )?;
+
+            // Insert labels
+            tx.execute("DELETE FROM labels WHERE issue_id = ?1", params![&issue.id])?;
+            for label in &issue.labels {
+                tx.execute(
+                    "INSERT INTO labels (issue_id, label) VALUES (?1, ?2)",
+                    params![&issue.id, label],
+                )?;
+            }
+
+            // Insert dependencies
+            tx.execute("DELETE FROM dependencies WHERE issue_id = ?1", params![&issue.id])?;
+            for dep in &issue.dependencies {
+                tx.execute(
+                    "INSERT INTO dependencies (issue_id, depends_on_id, type, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![&dep.issue_id, &dep.depends_on_id, &dep.type_, dep.created_at.to_rfc3339(), &dep.created_by],
+                )?;
+            }
+
+            // Insert comments
+            // Fetch existing comments for this issue to dedupe in memory (faster than many SELECTs)
+            let mut stmt = tx.prepare_cached("SELECT author, text FROM comments WHERE issue_id = ?1")?;
+            let existing_comments: std::collections::HashSet<(String, String)> = stmt
+                .query_map([&issue.id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .filter_map(Result::ok)
+                .collect();
+            drop(stmt); // Release borrow
+
+            for comment in &issue.comments {
+                if !existing_comments.contains(&(comment.author.clone(), comment.text.clone())) {
+                     tx.execute(
+                        "INSERT INTO comments (issue_id, author, text, created_at) VALUES (?1, ?2, ?3, ?4)",
+                        params![&issue.id, &comment.author, &comment.text, comment.created_at.to_rfc3339()],
+                    )?;
+                }
+            }
+        }
+
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn create_issue(&self, issue: &Issue) -> Result<()> {
