@@ -13,7 +13,37 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    List,
+    List {
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        assignee: Option<String>,
+        #[arg(long)]
+        priority: Option<i32>,
+        #[arg(long = "type")]
+        type_: Option<String>,
+    },
+    Show {
+        id: String,
+    },
+    Update {
+        id: String,
+        #[arg(long)]
+        title: Option<String>,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        status: Option<String>,
+        #[arg(long)]
+        priority: Option<i32>,
+        #[arg(long = "type")]
+        type_: Option<String>,
+        #[arg(long)]
+        assignee: Option<String>,
+    },
+    Close {
+        id: String,
+    },
     Create {
         title: String,
         #[arg(short, long, default_value = "")]
@@ -39,6 +69,8 @@ enum Commands {
         #[arg(long)]
         debug: bool,
     },
+    Onboard,
+    Ready,
     Sync,
     Config {
         #[command(subcommand)]
@@ -74,15 +106,98 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
+    // Ensure parent dir exists if we are onboarding
+    if let Commands::Onboard = &cli.command {
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
     let mut store = Store::open(&db_path).map_err(|e| anyhow::anyhow!("Failed to open DB at {:?}: {}", db_path, e))?;
 
     match cli.command {
-        Commands::List => {
-            let issues = store.list_issues()?;
+        Commands::List { status, assignee, priority, type_ } => {
+            let issues = store.list_issues(status.as_deref(), assignee.as_deref(), priority, type_.as_deref())?;
             println!("{:<10} {:<10} {:<10} {}", "ID", "STATUS", "PRIORITY", "TITLE");
             println!("{:-<60}", "");
             for issue in issues {
                 println!("{:<10} {:<10} {:<10} {}", issue.id, issue.status, issue.priority, issue.title);
+            }
+        }
+        Commands::Show { id } => {
+            if let Some(issue) = store.get_issue(&id)? {
+                println!("ID:          {}", issue.id);
+                println!("Title:       {}", issue.title);
+                println!("Status:      {}", issue.status);
+                println!("Priority:    {}", issue.priority);
+                println!("Type:        {}", issue.issue_type);
+                if let Some(assignee) = &issue.assignee {
+                    println!("Assignee:    {}", assignee);
+                }
+                println!("Created:     {}", issue.created_at);
+                println!("Updated:     {}", issue.updated_at);
+                println!("------------------------------------------------------------");
+                println!("{}", issue.description);
+
+                if !issue.labels.is_empty() {
+                    println!("\nLabels: {}", issue.labels.join(", "));
+                }
+
+                if !issue.dependencies.is_empty() {
+                    println!("\nDependencies:");
+                    for dep in issue.dependencies {
+                        println!("  {} ({})", dep.depends_on_id, dep.type_);
+                    }
+                }
+
+                if !issue.comments.is_empty() {
+                    println!("\nComments:");
+                    for comment in issue.comments {
+                        println!("  {} at {}:", comment.author, comment.created_at);
+                        println!("    {}", comment.text);
+                    }
+                }
+            } else {
+                eprintln!("Issue not found: {}", id);
+            }
+        }
+        Commands::Update { id, title, description, status, priority, type_, assignee } => {
+            if let Some(mut issue) = store.get_issue(&id)? {
+                let mut updated = false;
+                if let Some(t) = title { issue.title = t; updated = true; }
+                if let Some(d) = description { issue.description = d; updated = true; }
+                if let Some(s) = status { issue.status = s; updated = true; }
+                if let Some(p) = priority { issue.priority = p; updated = true; }
+                if let Some(t) = type_ { issue.issue_type = t; updated = true; }
+                if let Some(a) = assignee {
+                    issue.assignee = if a.is_empty() { None } else { Some(a) };
+                    updated = true;
+                }
+
+                if updated {
+                    issue.updated_at = Utc::now();
+                    store.update_issue(&issue)?;
+                    println!("Updated issue {}", issue.id);
+                } else {
+                    println!("No changes provided.");
+                }
+            } else {
+                eprintln!("Issue not found: {}", id);
+            }
+        }
+        Commands::Close { id } => {
+            if let Some(mut issue) = store.get_issue(&id)? {
+                if issue.status != "closed" {
+                    issue.status = "closed".to_string();
+                    issue.closed_at = Some(Utc::now());
+                    issue.updated_at = Utc::now();
+                    store.update_issue(&issue)?;
+                    println!("Closed issue {}", issue.id);
+                } else {
+                    println!("Issue {} is already closed.", issue.id);
+                }
+            } else {
+                eprintln!("Issue not found: {}", id);
             }
         }
         Commands::Export { output } => {
@@ -101,6 +216,131 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Merge { output, base, left, right, debug } => {
             beads_core::merge::merge3way(&output, &base, &left, &right, debug)?;
+        }
+        Commands::Onboard => {
+            // Check git init
+            if !std::path::Path::new(".git").exists() {
+                println!("Not a git repository. Initializing...");
+                std::process::Command::new("git")
+                    .arg("init")
+                    .status()?;
+            }
+
+            // Create .beads
+            let beads_dir = std::path::Path::new(".beads");
+            if !beads_dir.exists() {
+                std::fs::create_dir(beads_dir)?;
+                println!("Created .beads directory.");
+            }
+
+            // Create .gitignore
+            let gitignore_path = std::path::Path::new(".gitignore");
+            let mut gitignore_content = String::new();
+            if gitignore_path.exists() {
+                 gitignore_content = std::fs::read_to_string(gitignore_path)?;
+            }
+            if !gitignore_content.contains("beads.db") {
+                println!("Adding beads.db to .gitignore...");
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(gitignore_path)?;
+                writeln!(file, "\n.beads/beads.db")?;
+            }
+
+            // User config
+            // Try to read git config
+            let output = std::process::Command::new("git")
+                .args(["config", "user.name"])
+                .output();
+
+            let default_user = if let Ok(out) = output {
+                String::from_utf8_lossy(&out.stdout).trim().to_string()
+            } else {
+                String::new()
+            };
+
+            print!("Enter your username [{}]: ", default_user);
+            use std::io::Write;
+            std::io::stdout().flush()?;
+
+            let mut input = String::new();
+            std::io::stdin().read_line(&mut input)?;
+            let input = input.trim();
+
+            let user = if input.is_empty() {
+                default_user
+            } else {
+                input.to_string()
+            };
+
+            if !user.is_empty() {
+                store.set_config("user.name", &user)?;
+                println!("Configured user.name = {}", user);
+            } else {
+                println!("No user configured.");
+            }
+
+            println!("Onboarding complete!");
+        }
+        Commands::Ready => {
+            // Get current user
+            let user = store.get_config("user.name")?;
+            let assignee = user.as_deref().unwrap_or("unassigned");
+
+            // List issues not closed, assigned to user or unassigned (if user not set?)
+            // Requirement: "alias for listing open issues assigned to user or unassigned"
+            // If we have a user, we filter by that user.
+            // If we don't have a user, maybe list unassigned?
+
+            // Let's implement: Status != closed AND Assignee = <user>
+            // But list_issues currently filters via exact match or unassigned.
+            // Store::list_issues doesn't support "NOT closed". It supports "status = ?"
+            // So we might need to filter in memory or fetch "open", "in_progress" separately?
+            // "open" is default status. "closed" is closed.
+            // We usually want everything NOT closed.
+            // Since `list_issues` takes specific status, we can't easily say "not closed".
+            // Let's fetch all and filter in memory for now, or fetch by common open statuses.
+            // Given the limited "list_issues" SQL generation I wrote (AND logic), fetching all then filtering is safest without changing Store again.
+            // Wait, I can pass None for status (all) and filter in loop.
+
+            let all_issues = store.list_issues(None, None, None, None)?;
+
+            println!("Ready issues for {}:", assignee);
+            println!("{:<10} {:<10} {:<10} {}", "ID", "STATUS", "PRIORITY", "TITLE");
+            println!("{:-<60}", "");
+
+            for issue in all_issues {
+                if issue.status == "closed" {
+                    continue;
+                }
+
+                let matches_assignee = if let Some(a) = &issue.assignee {
+                    if let Some(u) = &user {
+                        a == u
+                    } else {
+                         // No user configured.
+                         // Should we show unassigned? Or everything?
+                         // "bd ready" implies "ready for ME".
+                         // If I don't know who ME is, I can't filter by assignee efficiently.
+                         // Maybe just show unassigned?
+                         // Let's assume matches_assignee = true if user is None (show all open?) or false?
+                         // Go with: if user is known, match it. If not, match nothing?
+                         // Or maybe prompt user to configure user.name?
+                         false
+                    }
+                } else {
+                     // Issue is unassigned.
+                     // Often "ready" queue includes unassigned issues one could pick up.
+                     // Let's include unassigned.
+                     true
+                };
+
+                if matches_assignee {
+                    println!("{:<10} {:<10} {:<10} {}", issue.id, issue.status, issue.priority, issue.title);
+                }
+            }
         }
         Commands::Sync => {
             let beads_dir = db_path.parent().unwrap();

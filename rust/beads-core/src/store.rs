@@ -110,6 +110,72 @@ impl Store {
         Ok(())
     }
 
+    pub fn update_issue(&self, issue: &Issue) -> Result<()> {
+        // Serialize nested fields
+        let relates_to_json = serde_json::to_string(&issue.relates_to).unwrap_or_default();
+
+        // Update main issue record
+        self.conn.execute(
+            "UPDATE issues SET
+                title = ?2, description = ?3, status = ?4, priority = ?5, issue_type = ?6,
+                created_at = ?7, updated_at = ?8, closed_at = ?9, external_ref = ?10,
+                sender = ?11, ephemeral = ?12, replies_to = ?13, relates_to = ?14,
+                duplicate_of = ?15, superseded_by = ?16,
+                deleted_at = ?17, deleted_by = ?18, delete_reason = ?19, original_type = ?20,
+                assignee = ?21, estimated_minutes = ?22
+             WHERE id = ?1",
+            params![
+                &issue.id,
+                &issue.title,
+                &issue.description,
+                &issue.status,
+                &issue.priority,
+                &issue.issue_type,
+                issue.created_at.to_rfc3339(),
+                issue.updated_at.to_rfc3339(),
+                issue.closed_at.map(|t| t.to_rfc3339()),
+                &issue.external_ref,
+                &issue.sender,
+                issue.ephemeral,
+                &issue.replies_to,
+                relates_to_json,
+                &issue.duplicate_of,
+                &issue.superseded_by,
+                issue.deleted_at.map(|t| t.to_rfc3339()),
+                &issue.deleted_by,
+                &issue.delete_reason,
+                &issue.original_type,
+                &issue.assignee,
+                &issue.estimated_minutes,
+            ],
+        )?;
+
+        // Replace labels
+        self.conn.execute("DELETE FROM labels WHERE issue_id = ?1", params![&issue.id])?;
+        for label in &issue.labels {
+            self.conn.execute(
+                "INSERT INTO labels (issue_id, label) VALUES (?1, ?2)",
+                params![&issue.id, label],
+            )?;
+        }
+
+        // Replace dependencies
+        self.conn.execute("DELETE FROM dependencies WHERE issue_id = ?1", params![&issue.id])?;
+        for dep in &issue.dependencies {
+            self.conn.execute(
+                "INSERT INTO dependencies (issue_id, depends_on_id, type, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![&dep.issue_id, &dep.depends_on_id, &dep.type_, dep.created_at.to_rfc3339(), &dep.created_by],
+            )?;
+        }
+
+        // Mark as dirty
+        self.conn.execute(
+            "INSERT OR IGNORE INTO dirty_issues (issue_id) VALUES (?1)",
+            params![&issue.id],
+        )?;
+        Ok(())
+    }
+
     pub fn list_config(&self) -> Result<Vec<(String, String)>> {
         let mut stmt = self.conn.prepare("SELECT key, value FROM config ORDER BY key")?;
         let rows = stmt.query_map([], |row| {
@@ -127,14 +193,207 @@ impl Store {
         self.conn.execute_batch(sql)
     }
 
-    pub fn list_issues(&self) -> Result<Vec<Issue>> {
-        // Basic list for CLI "bd list" - mostly subset of fields
+    pub fn get_issue(&self, id: &str) -> Result<Option<Issue>> {
+        // Handle short ID (prefix match)
+        let query_id = if id.len() < 36 {
+             format!("{}%", id)
+        } else {
+             id.to_string()
+        };
+
         let mut stmt = self.conn.prepare(
-            "SELECT id, title, description, status, priority, issue_type, created_at, updated_at
-             FROM issues"
+            "SELECT
+                id, content_hash, title, description, design, acceptance_criteria, notes,
+                status, priority, issue_type, assignee, estimated_minutes,
+                created_at, updated_at, closed_at, external_ref,
+                sender, ephemeral, replies_to, relates_to, duplicate_of, superseded_by,
+                deleted_at, deleted_by, delete_reason, original_type
+             FROM issues
+             WHERE id LIKE ?1
+             LIMIT 1"
         )?;
 
-        let issue_iter = stmt.query_map([], |row| {
+        let mut rows = stmt.query([&query_id])?;
+
+        let row = if let Some(row) = rows.next()? {
+            row
+        } else {
+            return Ok(None);
+        };
+
+        let id: String = row.get(0)?;
+
+        // Fetch children
+        let mut labels = Vec::new();
+        let mut labels_stmt = self.conn.prepare("SELECT label FROM labels WHERE issue_id = ?1")?;
+        let labels_rows = labels_stmt.query_map([&id], |r| r.get(0))?;
+        for l in labels_rows {
+            labels.push(l?);
+        }
+
+        let mut deps = Vec::new();
+        let mut deps_stmt = self.conn.prepare("SELECT depends_on_id, type, created_at, created_by FROM dependencies WHERE issue_id = ?1")?;
+        let deps_rows = deps_stmt.query_map([&id], |r| {
+             let created_at_s: String = r.get(2)?;
+             let created_at = parse_timestamp(&created_at_s).unwrap_or_else(|| Utc::now());
+             Ok(Dependency {
+                 issue_id: id.clone(),
+                 depends_on_id: r.get(0)?,
+                 type_: r.get(1)?,
+                 created_at,
+                 created_by: r.get(3)?,
+             })
+        })?;
+        for d in deps_rows {
+            deps.push(d?);
+        }
+
+        let mut comments = Vec::new();
+        let mut comments_stmt = self.conn.prepare("SELECT id, author, text, created_at FROM comments WHERE issue_id = ?1 ORDER BY created_at")?;
+        let comments_rows = comments_stmt.query_map([&id], |r| {
+             let created_at_s: String = r.get(3)?;
+             let created_at = parse_timestamp(&created_at_s).unwrap_or_else(|| Utc::now());
+             Ok(Comment {
+                 id: r.get(0)?,
+                 issue_id: id.clone(),
+                 author: r.get(1)?,
+                 text: r.get(2)?,
+                 created_at,
+             })
+        })?;
+        for c in comments_rows {
+            comments.push(c?);
+        }
+
+        let created_at_s: String = row.get(12)?;
+        let updated_at_s: String = row.get(13)?;
+        let closed_at_s: Option<String> = row.get(14)?;
+        let deleted_at_s: Option<String> = row.get(22)?;
+
+        let created_at = parse_timestamp(&created_at_s).unwrap_or_else(|| Utc::now());
+        let updated_at = parse_timestamp(&updated_at_s).unwrap_or_else(|| Utc::now());
+        let closed_at = closed_at_s.and_then(|s| parse_timestamp(&s));
+        let deleted_at = deleted_at_s.and_then(|s| parse_timestamp(&s));
+
+        let relates_to_s: String = row.get(19).unwrap_or_default();
+        let relates_to = if relates_to_s.is_empty() {
+            Vec::new()
+        } else {
+            serde_json::from_str(&relates_to_s).unwrap_or_default()
+        };
+
+        Ok(Some(Issue {
+            id,
+            content_hash: row.get(1).unwrap_or_default(),
+            title: row.get(2).unwrap_or_default(),
+            description: row.get(3).unwrap_or_default(),
+            design: row.get(4).unwrap_or_default(),
+            acceptance_criteria: row.get(5).unwrap_or_default(),
+            notes: row.get(6).unwrap_or_default(),
+            status: row.get(7).unwrap_or_default(),
+            priority: row.get(8).unwrap_or_default(),
+            issue_type: row.get(9).unwrap_or_default(),
+            assignee: row.get(10)?,
+            estimated_minutes: row.get(11)?,
+            created_at,
+            updated_at,
+            closed_at,
+            external_ref: row.get(15)?,
+            sender: row.get(16).unwrap_or_default(),
+            ephemeral: row.get(17).unwrap_or(false),
+            replies_to: row.get(18).unwrap_or_default(),
+            relates_to,
+            duplicate_of: row.get(20).unwrap_or_default(),
+            superseded_by: row.get(21).unwrap_or_default(),
+            deleted_at,
+            deleted_by: row.get(23).unwrap_or_default(),
+            delete_reason: row.get(24).unwrap_or_default(),
+            original_type: row.get(25).unwrap_or_default(),
+            labels,
+            dependencies: deps,
+            comments,
+        }))
+    }
+
+    pub fn list_issues(&self, status: Option<&str>, assignee: Option<&str>, priority: Option<i32>, issue_type: Option<&str>) -> Result<Vec<Issue>> {
+        // Build query dynamically
+        let mut sql = "SELECT id, title, description, status, priority, issue_type, created_at, updated_at, assignee FROM issues WHERE 1=1".to_string();
+        let mut params = Vec::new();
+
+        if let Some(s) = status {
+            sql.push_str(" AND status = ?");
+            params.push(s.to_string());
+        }
+        if let Some(a) = assignee {
+            if a == "unassigned" {
+                sql.push_str(" AND (assignee IS NULL OR assignee = '')");
+            } else {
+                sql.push_str(" AND assignee = ?");
+                params.push(a.to_string());
+            }
+        }
+        // Special handling for priority/type to match CLI types if needed, but for now simple string/int binding
+        if let Some(p) = priority {
+            sql.push_str(" AND priority = ?");
+            // params is Vec<String>, but we need to bind int.
+            // rusqlite parameters are tricky with dynamic queries and mixed types if using positional params vector.
+            // A common workaround is to convert all to explicit dyn ToSql or handle bindings manually.
+            // Since we only have a few filters, let's use named parameters or rebuild params vector to be `&[&dyn ToSql]`.
+            // But Vec<&dyn ToSql> is hard to manage with lifetimes of values.
+            // Let's stick to the simpler approach: keep params separate and bind by index.
+        }
+        // Let's restart the approach to be safer with rusqlite.
+
+        // We will construct the SQL string and a separate list of parameter values (as enum/trait objects).
+
+        // However, rusqlite's query method takes params! or [] which expects things that implement ToSql.
+        // It's easier to just construct the query string with values embedded if they are safe, BUT that's SQL injection risk.
+        // So we MUST use parameters.
+
+        // Let's assume we won't have too many combinations and use a simpler logic or a builder.
+        // Or simply:
+
+        let mut conditions = Vec::new();
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+
+        if let Some(s) = status {
+            conditions.push("status = ?");
+            args.push(Box::new(s.to_string()));
+        }
+
+        if let Some(a) = assignee {
+            if a == "unassigned" {
+                conditions.push("(assignee IS NULL OR assignee = '')");
+            } else {
+                conditions.push("assignee = ?");
+                args.push(Box::new(a.to_string()));
+            }
+        }
+
+        if let Some(p) = priority {
+            conditions.push("priority = ?");
+            args.push(Box::new(p));
+        }
+
+        if let Some(t) = issue_type {
+            conditions.push("issue_type = ?");
+            args.push(Box::new(t.to_string()));
+        }
+
+        let mut sql = "SELECT id, title, description, status, priority, issue_type, created_at, updated_at, assignee FROM issues".to_string();
+        if !conditions.is_empty() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+        sql.push_str(" ORDER BY created_at DESC");
+
+        let mut stmt = self.conn.prepare(&sql)?;
+
+        // We need to convert Vec<Box<dyn ToSql>> to slice of references.
+        // This is a bit annoying in Rust.
+        // Workaround: `rusqlite::params_from_iter`.
+
+        let issue_iter = stmt.query_map(rusqlite::params_from_iter(args.iter()), |row| {
             let created_at_s: String = row.get(6)?;
             let updated_at_s: String = row.get(7)?;
 
