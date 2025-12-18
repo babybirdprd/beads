@@ -10,7 +10,7 @@ We have established the foundational structure for the Rust port of `beads`.
 ---
 
 ## Progress Assessment
-**Overall Completion: ~75%**
+**Overall Completion: ~80%**
 
 | Component | Status | Notes |
 | :--- | :--- | :--- |
@@ -18,7 +18,7 @@ We have established the foundational structure for the Rust port of `beads`.
 | **Storage** | 🟢 Complete | Read/write works. `export_to_jsonl` implemented. |
 | **ID Generation** | 🟢 Complete | Ported Base36 logic and hash generation (prefix, length, nonce) from Go. |
 | **CLI** | 🟢 Complete | `create`, `list`, `sync` commands implemented. Binary name is `bd`. |
-| **Git Integration** | 🟢 Complete | `git` module implemented in `beads-core` (init, add, commit, pull --rebase, push, status, show). |
+| **Git Integration** | 🟢 Complete | `GitOps` trait implemented in `beads-core`. `StdGit` provides `std::process::Command` implementation. |
 | **Merge Logic** | 🟢 Complete | 3-way merge algorithm ported including tombstone handling. |
 | **Sync Logic** | 🟢 Complete | `bd sync` command implemented with conflict resolution. |
 | **Compatibility** | 🟢 Verified | Cross-language test suite `scripts/verify_compat.sh` passes. |
@@ -31,8 +31,7 @@ We have established the foundational structure for the Rust port of `beads`.
 Your goal is to prepare the codebase for WASM compilation and expand feature parity.
 
 ### 1. WASM Preparation
-* **Task**: Audit `beads-core` for non-WASM compatible IO (mostly `std::fs` and `std::process::Command` in `git.rs`).
-* **Strategy**: Consider defining a `GitProvider` trait to abstract git operations, allowing a JS/WASM implementation later.
+* **Task**: Audit `beads-core` for remaining non-WASM compatible IO (mostly `std::fs` in `sync.rs` and `store.rs`).
 * **Refactor**: Introduce traits for file system access to abstract away `std::fs`.
 
 ### 2. Feature Parity
