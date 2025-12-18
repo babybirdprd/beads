@@ -481,63 +481,68 @@ fn main() -> anyhow::Result<()> {
                          // We could also parse the YAML to allow user to change title/priority/type during creation!
                          // This is better UX.
                          let yaml_part = parts[1];
-                         if let Ok(new_fm) = serde_yaml::from_str::<IssueFrontmatter>(yaml_part) {
-                             // Can't easily update local vars in match arm, but we can shadow them?
-                             // No, we need to use them in Issue struct.
-                             // Let's reconstruct.
-                             // Wait, `Commands::Create` has arguments.
-                             // If I update them here, I should use the updated values.
+                         match serde_yaml::from_str::<IssueFrontmatter>(yaml_part) {
+                             Ok(new_fm) => {
+                                 // Let's assume we use the parsed values if valid.
+                                 description = body_part;
 
-                             // Let's assume we use the parsed values if valid.
-                             description = body_part;
+                                 let now = Utc::now();
+                                 // Use new_fm values
+                                 let id_hash = util::generate_hash_id(&new_fm.title, &description, now, "default-workspace");
+                                 let short_id = format!("bd-{}", id_hash);
 
-                             let now = Utc::now();
-                             // Use new_fm values
-                             let id_hash = util::generate_hash_id(&new_fm.title, &description, now, "default-workspace");
-                             let short_id = format!("bd-{}", id_hash);
+                                 let issue = Issue {
+                                    id: short_id.clone(),
+                                    content_hash: String::new(),
+                                    title: new_fm.title,
+                                    description,
+                                    design: String::new(),
+                                    acceptance_criteria: String::new(),
+                                    notes: String::new(),
+                                    status: new_fm.status,
+                                    priority: new_fm.priority,
+                                    issue_type: new_fm.issue_type,
+                                    assignee: new_fm.assignee,
+                                    estimated_minutes: None,
+                                    created_at: now,
+                                    updated_at: now,
+                                    closed_at: None,
+                                    external_ref: None,
+                                    sender: String::new(),
+                                    ephemeral: false,
+                                    replies_to: String::new(),
+                                    relates_to: Vec::new(),
+                                    duplicate_of: String::new(),
+                                    superseded_by: String::new(),
 
-                             let issue = Issue {
-                                id: short_id.clone(),
-                                content_hash: String::new(),
-                                title: new_fm.title,
-                                description,
-                                design: String::new(),
-                                acceptance_criteria: String::new(),
-                                notes: String::new(),
-                                status: new_fm.status,
-                                priority: new_fm.priority,
-                                issue_type: new_fm.issue_type,
-                                assignee: new_fm.assignee,
-                                estimated_minutes: None,
-                                created_at: now,
-                                updated_at: now,
-                                closed_at: None,
-                                external_ref: None,
-                                sender: String::new(),
-                                ephemeral: false,
-                                replies_to: String::new(),
-                                relates_to: Vec::new(),
-                                duplicate_of: String::new(),
-                                superseded_by: String::new(),
+                                    deleted_at: None,
+                                    deleted_by: String::new(),
+                                    delete_reason: String::new(),
+                                    original_type: String::new(),
 
-                                deleted_at: None,
-                                deleted_by: String::new(),
-                                delete_reason: String::new(),
-                                original_type: String::new(),
-
-                                labels: Vec::new(),
-                                dependencies: Vec::new(),
-                                comments: Vec::new(),
-                            };
-                            store.create_issue(&issue)?;
-                            println!("Created issue {}", short_id);
-                            return Ok(());
+                                    labels: Vec::new(),
+                                    dependencies: Vec::new(),
+                                    comments: Vec::new(),
+                                };
+                                store.create_issue(&issue)?;
+                                println!("Created issue {}", short_id);
+                                return Ok(());
+                             },
+                             Err(e) => {
+                                 anyhow::bail!("Invalid frontmatter: {}", e);
+                             }
                          }
+                    } else {
+                         anyhow::bail!("Invalid format: missing frontmatter delimiters");
                     }
+                } else {
+                     anyhow::bail!("Invalid format: file must start with ---");
                 }
             }
 
-            // Default path if no interaction or interaction failed/skipped
+            // Fallback only happens if description was NOT empty initially, which is handled above.
+            // If description IS empty, we returned or bailed above.
+            // So this path is only for non-interactive creation.
             let now = Utc::now();
             // TODO: Real workspace ID from config
             let id_hash = util::generate_hash_id(&title, &description, now, "default-workspace");

@@ -1,13 +1,18 @@
 # Rust Porting Guide
 
 ## Current Status (Fully Implemented CLI Commands)
-We have achieved feature parity for the core CLI workflow:
+We have achieved feature parity for the core CLI workflow and enhanced usability:
+
 - **beads-core**:
     - `Store::import_from_jsonl` implements strict sync.
     - `Store::get_issue`, `Store::update_issue` support reading and modifying issues.
     - `Store::list_issues` supports filtering by status, assignee, priority, and type.
     - `merge` module has unit tests covering conflicts and tombstones.
+
 - **beads-cli** (binary `bd`):
+    - **Interactive Editing**: `bd edit <id>` opens issues in `$EDITOR` with YAML frontmatter for metadata. `bd create` defaults to interactive mode if description is missing.
+    - **Path Handling**: Robust recursive search for `.beads/beads.db` allows running `bd` from any subdirectory.
+    - **Testing**: Integration tests in `tests/cli_tests.rs` cover the full lifecycle (`onboard`, `create`, `list`, `edit`, `close`) using `assert_cmd`.
     - **Management**: `create`, `show`, `update`, `close`.
     - **Workflow**: `list` (with filters), `ready` (personal backlog), `onboard` (wizard).
     - **Sync**: `sync`, `export`, `import`, `merge`.
@@ -15,28 +20,28 @@ We have achieved feature parity for the core CLI workflow:
 
 ## Continuation Prompt / Next Steps
 
-Your goal is to refine the user experience and ensure robustness through comprehensive testing and interactive features.
+You are continuing the port of the Beads issue tracker to Rust. The core logic, CLI structure, and basic interactive editing are complete. Your goal is to polish the user experience, deepen Git integration, and prepare for distribution.
 
-### 1. Interactive Editing & Usability
-The current `bd create` and `bd update` rely on command-line flags.
-- **Task**: Implement `bd edit <id>` to open the issue description (and potentially other fields via frontmatter) in the user's `$EDITOR`.
-- **Task**: Enhance `bd create` to launch the editor if the description flag is omitted.
-- **Logic**:
-    - Detect `$EDITOR` or fallback to `vi/nano`.
-    - Create a temp file with the current description.
-    - Wait for editor process to exit.
-    - Read content and update the issue.
+### 1. Robust Git Integration & Sync
+Currently, `bd sync` manually calls `Store::import_from_jsonl` / `export_to_jsonl`.
+- **Task**: Automate Git operations within `bd sync`.
+    - Auto-commit changes to `.beads/issues.jsonl` after export?
+    - Handle git merge conflicts if `issues.jsonl` is conflicted? (The `bd merge` command exists for 3-way merge, but needs to be hooked up to git merge driver or handled manually).
+    - Consider implementing a `git-merge-beads` driver using the `merge` module logic.
 
-### 2. Comprehensive CLI Testing
-We have unit tests for `beads-core`, but `beads-cli` lacks integration tests.
-- **Task**: Add integration tests using `assert_cmd` or a shell script harness to verify CLI behavior.
-    - Test `bd onboard` in a temp directory.
-    - Test the full lifecycle: `create` -> `show` -> `update` -> `close`.
-    - Verify `sync` creates valid JSONL.
+### 2. UX Polish: formatting & Colors
+The `bd list` output is currently plain text with manual alignment.
+- **Task**: Use a crate like `comfy-table` or `tabled` to render pretty tables for `bd list`.
+- **Task**: Add colored output for statuses (e.g., Red for "bug", Green for "closed") using `colored` or `anstyle`.
 
-### 3. Cross-Platform & Path Handling
-- **Task**: Verify `bd onboard` and path handling on non-Unix systems (if relevant) or ensure robust handling of `.beads` directory paths in nested subdirectories.
-- **Check**: Ensure `find_db_path` correctly locates the DB when running from a subdirectory.
+### 3. Advanced Filtering
+`bd list` supports basic filters.
+- **Task**: Add support for filtering by labels (e.g., `bd list --label "frontend"`).
+- **Task**: Add sorting options (e.g., `bd list --sort updated`).
+
+### 4. Error Handling & Logging
+- **Task**: Ensure all user-facing errors are helpful (avoid raw `anyhow` stack traces for common errors like "Issue not found").
+- **Task**: verify `RUST_LOG` usage for debugging.
 
 ## Architecture Notes
 - **No Daemon**: We are intentionally dropping the Daemon/RPC architecture. Use SQLite file locking for concurrency safety.
