@@ -2,11 +2,23 @@ use std::process::Command;
 use std::path::{Path, PathBuf};
 use anyhow::{Result, Context, bail};
 
-pub struct Git {
+pub trait GitOps {
+    fn init(&self) -> Result<()>;
+    fn add(&self, path: &Path) -> Result<()>;
+    fn commit(&self, message: &str) -> Result<()>;
+    fn pull_rebase(&self) -> Result<()>;
+    fn push(&self) -> Result<()>;
+    fn status(&self) -> Result<String>;
+    fn show(&self, revision: &str) -> Result<String>;
+    fn rebase_continue(&self) -> Result<()>;
+    fn has_remote(&self) -> Result<bool>;
+}
+
+pub struct StdGit {
     root: PathBuf,
 }
 
-impl Git {
+impl StdGit {
     pub fn new<P: AsRef<Path>>(root: P) -> Self {
         Self {
             root: root.as_ref().to_path_buf(),
@@ -19,8 +31,10 @@ impl Git {
         cmd.args(args);
         cmd
     }
+}
 
-    pub fn init(&self) -> Result<()> {
+impl GitOps for StdGit {
+    fn init(&self) -> Result<()> {
         let output = self.command(&["init"])
             .output()
             .context("Failed to run git init")?;
@@ -31,8 +45,8 @@ impl Git {
         Ok(())
     }
 
-    pub fn add<P: AsRef<Path>>(&self, path: P) -> Result<()> {
-        let path_s = path.as_ref().to_string_lossy();
+    fn add(&self, path: &Path) -> Result<()> {
+        let path_s = path.to_string_lossy();
         let output = self.command(&["add", &path_s])
             .output()
             .context("Failed to run git add")?;
@@ -43,7 +57,7 @@ impl Git {
         Ok(())
     }
 
-    pub fn commit(&self, message: &str) -> Result<()> {
+    fn commit(&self, message: &str) -> Result<()> {
         let output = self.command(&["commit", "-m", message])
             .output()
             .context("Failed to run git commit")?;
@@ -59,7 +73,7 @@ impl Git {
         Ok(())
     }
 
-    pub fn pull_rebase(&self) -> Result<()> {
+    fn pull_rebase(&self) -> Result<()> {
         // pull --rebase
         let output = self.command(&["pull", "--rebase"])
             .output()
@@ -72,7 +86,7 @@ impl Git {
         Ok(())
     }
 
-    pub fn push(&self) -> Result<()> {
+    fn push(&self) -> Result<()> {
         let output = self.command(&["push"])
             .output()
             .context("Failed to run git push")?;
@@ -83,7 +97,7 @@ impl Git {
         Ok(())
     }
 
-    pub fn status(&self) -> Result<String> {
+    fn status(&self) -> Result<String> {
         let output = self.command(&["status", "--porcelain"])
             .output()
             .context("Failed to run git status")?;
@@ -94,7 +108,7 @@ impl Git {
         Ok(String::from_utf8(output.stdout)?)
     }
 
-    pub fn show(&self, revision: &str) -> Result<String> {
+    fn show(&self, revision: &str) -> Result<String> {
         let output = self.command(&["show", revision])
             .output()
             .context("Failed to run git show")?;
@@ -105,7 +119,7 @@ impl Git {
         Ok(String::from_utf8(output.stdout)?)
     }
 
-    pub fn rebase_continue(&self) -> Result<()> {
+    fn rebase_continue(&self) -> Result<()> {
         let output = self.command(&["rebase", "--continue"])
             .env("GIT_EDITOR", "true") // avoid editor opening
             .output()
@@ -117,7 +131,7 @@ impl Git {
         Ok(())
     }
 
-    pub fn has_remote(&self) -> Result<bool> {
+    fn has_remote(&self) -> Result<bool> {
         let output = self.command(&["remote"])
             .output()
             .context("Failed to run git remote")?;

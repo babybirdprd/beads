@@ -456,8 +456,9 @@ fn main() -> anyhow::Result<()> {
         Commands::Sync => {
             let beads_dir = db_path.parent().unwrap();
             let git_root = beads_dir.parent().unwrap_or(std::path::Path::new("."));
+            let git = beads_core::StdGit::new(git_root);
             let jsonl_path = beads_dir.join("issues.jsonl");
-            beads_core::sync::run_sync(&mut store, git_root, &jsonl_path).context("Sync failed")?;
+            beads_core::sync::run_sync(&mut store, &git, git_root, &jsonl_path).context("Sync failed")?;
             println!("Sync complete.");
         }
         Commands::Config { command } => match command {

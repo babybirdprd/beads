@@ -1,4 +1,4 @@
-use beads_core::git::Git;
+use beads_core::git::{GitOps, StdGit};
 use std::fs;
 use tempfile::tempdir;
 
@@ -6,7 +6,7 @@ use tempfile::tempdir;
 fn test_git_operations() {
     let dir = tempdir().unwrap();
     let root = dir.path();
-    let git = Git::new(root);
+    let git = StdGit::new(root);
 
     // Init
     git.init().expect("git init failed");
@@ -16,7 +16,7 @@ fn test_git_operations() {
     fs::write(&file_path, "hello world").unwrap();
 
     // Add
-    git.add("test.txt").expect("git add failed");
+    git.add(&file_path).expect("git add failed");
 
     // Commit
     git.commit("initial commit").expect("git commit failed");
@@ -34,7 +34,7 @@ fn test_git_operations() {
     assert!(status_dirty.contains("test.txt"));
 
     // Add and commit again
-    git.add("test.txt").expect("git add failed");
+    git.add(&file_path).expect("git add failed");
     git.commit("second commit").expect("git commit failed");
 
     // Show content of HEAD
