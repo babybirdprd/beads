@@ -2,6 +2,8 @@ use clap::{Parser, Subcommand};
 use beads_core::{Store, Issue, util};
 use chrono::Utc;
 use std::path::PathBuf;
+use serde::{Serialize, Deserialize};
+use std::io::Write;
 
 #[derive(Parser)]
 #[command(name = "bd")]
@@ -40,6 +42,9 @@ enum Commands {
         type_: Option<String>,
         #[arg(long)]
         assignee: Option<String>,
+    },
+    Edit {
+        id: String,
     },
     Close {
         id: String,
@@ -85,12 +90,28 @@ enum ConfigCommands {
     List,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct IssueFrontmatter {
+    title: String,
+    status: String,
+    priority: i32,
+    #[serde(rename = "type")]
+    issue_type: String,
+    #[serde(default)]
+    assignee: Option<String>,
+}
+
 fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
 
     // Find DB
-    let db_path = find_db_path();
+    let db_path = if matches!(cli.command, Commands::Onboard) {
+         PathBuf::from(".beads/beads.db")
+    } else {
+         find_db_path()
+    };
+
     // Ensure parent dir exists if we are creating
     if let Commands::Create { .. } = cli.command {
         if let Some(parent) = db_path.parent() {
@@ -180,6 +201,64 @@ fn main() -> anyhow::Result<()> {
                     println!("Updated issue {}", issue.id);
                 } else {
                     println!("No changes provided.");
+                }
+            } else {
+                eprintln!("Issue not found: {}", id);
+            }
+        }
+        Commands::Edit { id } => {
+            if let Some(mut issue) = store.get_issue(&id)? {
+                let frontmatter = IssueFrontmatter {
+                    title: issue.title.clone(),
+                    status: issue.status.clone(),
+                    priority: issue.priority,
+                    issue_type: issue.issue_type.clone(),
+                    assignee: issue.assignee.clone(),
+                };
+
+                let yaml = serde_yaml::to_string(&frontmatter)?;
+                let content = format!("---\n{}---\n\n{}", yaml, issue.description);
+
+                let mut file = tempfile::Builder::new()
+                    .suffix(".md")
+                    .tempfile()?;
+                write!(file, "{}", content)?;
+
+                let path = file.path().to_owned();
+                file.keep()?; // Keep the file so editor can open it, we'll delete later or let OS handle tmp
+
+                edit::edit_file(&path)?;
+
+                let new_content = std::fs::read_to_string(&path)?;
+                std::fs::remove_file(path)?;
+
+                // Parse
+                if new_content.starts_with("---") {
+                    let parts: Vec<&str> = new_content.splitn(3, "---").collect();
+                    if parts.len() >= 3 {
+                        let yaml_part = parts[1];
+                        let body_part = parts[2].trim().to_string();
+
+                        let new_fm: IssueFrontmatter = serde_yaml::from_str(yaml_part)
+                            .map_err(|e| anyhow::anyhow!("Invalid frontmatter: {}", e))?;
+
+                        issue.title = new_fm.title;
+                        issue.status = new_fm.status;
+                        issue.priority = new_fm.priority;
+                        issue.issue_type = new_fm.issue_type;
+                        issue.assignee = new_fm.assignee;
+                        issue.description = body_part;
+                        issue.updated_at = Utc::now();
+
+                        store.update_issue(&issue)?;
+                        println!("Updated issue {}", issue.id);
+                    } else {
+                        eprintln!("Invalid format: missing frontmatter delimiters");
+                    }
+                } else {
+                     // Assume just description if no frontmatter?
+                     // Or error out? Better to be safe.
+                     eprintln!("Invalid format: file must start with ---");
                 }
             } else {
                 eprintln!("Issue not found: {}", id);
@@ -368,7 +447,102 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         },
-        Commands::Create { title, description, type_, priority } => {
+        Commands::Create { title, mut description, type_, priority } => {
+            // Interactive editing if description is empty
+            if description.is_empty() {
+                 let frontmatter = IssueFrontmatter {
+                    title: title.clone(),
+                    status: "open".to_string(),
+                    priority,
+                    issue_type: type_.clone(),
+                    assignee: None,
+                };
+
+                let yaml = serde_yaml::to_string(&frontmatter)?;
+                let content = format!("---\n{}---\n\n{}", yaml, "");
+
+                let mut file = tempfile::Builder::new()
+                    .suffix(".md")
+                    .tempfile()?;
+                write!(file, "{}", content)?;
+
+                let path = file.path().to_owned();
+                file.keep()?;
+
+                edit::edit_file(&path)?;
+
+                let new_content = std::fs::read_to_string(&path)?;
+                std::fs::remove_file(path)?;
+
+                 if new_content.starts_with("---") {
+                    let parts: Vec<&str> = new_content.splitn(3, "---").collect();
+                    if parts.len() >= 3 {
+                         let body_part = parts[2].trim().to_string();
+                         // We could also parse the YAML to allow user to change title/priority/type during creation!
+                         // This is better UX.
+                         let yaml_part = parts[1];
+                         match serde_yaml::from_str::<IssueFrontmatter>(yaml_part) {
+                             Ok(new_fm) => {
+                                 // Let's assume we use the parsed values if valid.
+                                 description = body_part;
+
+                                 let now = Utc::now();
+                                 // Use new_fm values
+                                 let id_hash = util::generate_hash_id(&new_fm.title, &description, now, "default-workspace");
+                                 let short_id = format!("bd-{}", id_hash);
+
+                                 let issue = Issue {
+                                    id: short_id.clone(),
+                                    content_hash: String::new(),
+                                    title: new_fm.title,
+                                    description,
+                                    design: String::new(),
+                                    acceptance_criteria: String::new(),
+                                    notes: String::new(),
+                                    status: new_fm.status,
+                                    priority: new_fm.priority,
+                                    issue_type: new_fm.issue_type,
+                                    assignee: new_fm.assignee,
+                                    estimated_minutes: None,
+                                    created_at: now,
+                                    updated_at: now,
+                                    closed_at: None,
+                                    external_ref: None,
+                                    sender: String::new(),
+                                    ephemeral: false,
+                                    replies_to: String::new(),
+                                    relates_to: Vec::new(),
+                                    duplicate_of: String::new(),
+                                    superseded_by: String::new(),
+
+                                    deleted_at: None,
+                                    deleted_by: String::new(),
+                                    delete_reason: String::new(),
+                                    original_type: String::new(),
+
+                                    labels: Vec::new(),
+                                    dependencies: Vec::new(),
+                                    comments: Vec::new(),
+                                };
+                                store.create_issue(&issue)?;
+                                println!("Created issue {}", short_id);
+                                return Ok(());
+                             },
+                             Err(e) => {
+                                 anyhow::bail!("Invalid frontmatter: {}", e);
+                             }
+                         }
+                    } else {
+                         anyhow::bail!("Invalid format: missing frontmatter delimiters");
+                    }
+                } else {
+                     anyhow::bail!("Invalid format: file must start with ---");
+                }
+            }
+
+            // Fallback only happens if description was NOT empty initially, which is handled above.
+            // If description IS empty, we returned or bailed above.
+            // So this path is only for non-interactive creation.
             let now = Utc::now();
             // TODO: Real workspace ID from config
             let id_hash = util::generate_hash_id(&title, &description, now, "default-workspace");
@@ -417,16 +591,22 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn find_db_path() -> PathBuf {
-    // Check current dir .beads/beads.db
-    let p = PathBuf::from(".beads/beads.db");
-    if p.exists() {
-        return p;
+    let mut current = match std::env::current_dir() {
+        Ok(c) => c,
+        Err(_) => return PathBuf::from(".beads/beads.db"),
+    };
+
+    loop {
+        let p = current.join(".beads/beads.db");
+        if p.exists() {
+            return p;
+        }
+        if !current.pop() {
+            break;
+        }
     }
-    // Check parent dir (for development)
-    let p_parent = PathBuf::from("../.beads/beads.db");
-    if p_parent.exists() {
-        return p_parent;
-    }
-    // Fallback to relative
-    p
+    // Default to .beads/beads.db in original CWD if not found (relative)
+    // We can't easily get original CWD here since we popped `current`.
+    // But `PathBuf::from` is relative to process CWD.
+    PathBuf::from(".beads/beads.db")
 }
