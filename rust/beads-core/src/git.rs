@@ -116,4 +116,16 @@ impl Git {
         }
         Ok(())
     }
+
+    pub fn has_remote(&self) -> Result<bool> {
+        let output = self.command(&["remote"])
+            .output()
+            .context("Failed to run git remote")?;
+
+        if !output.status.success() {
+             return Ok(false);
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(!stdout.trim().is_empty())
+    }
 }
