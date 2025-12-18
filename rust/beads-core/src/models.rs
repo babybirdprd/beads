@@ -24,7 +24,7 @@ pub struct Comment {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Issue {
     pub id: String,
 
