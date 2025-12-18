@@ -51,13 +51,8 @@ fn encode_base36(data: &[u8], length: usize) -> String {
     }
 }
 
-pub fn generate_hash_id(title: &str, description: &str, created_at: DateTime<Utc>, creator: &str) -> String {
+pub fn generate_hash_id(prefix: &str, title: &str, description: &str, creator: &str, created_at: DateTime<Utc>, length: usize, nonce: usize) -> String {
     // Go: content := fmt.Sprintf("%s|%s|%s|%d|%d", title, description, creator, timestamp.UnixNano(), nonce)
-    // We use nonce = 0
-    // We use length = 6 (default fallback in Go)
-
-    let nonce = 0;
-    let length = 6;
     let timestamp_nano = created_at.timestamp_nanos_opt().unwrap_or(0);
 
     let content = format!("{}|{}|{}|{}|{}", title, description, creator, timestamp_nano, nonce);
@@ -67,11 +62,27 @@ pub fn generate_hash_id(title: &str, description: &str, created_at: DateTime<Utc
     let result = hasher.finalize(); // [u8; 32]
 
     // Go logic for numBytes:
+    // case 3: numBytes = 2
+    // case 4: numBytes = 3
+    // case 5: numBytes = 4
     // case 6: numBytes = 4
-    let num_bytes = 4;
+    // case 7: numBytes = 5
+    // case 8: numBytes = 5
+    // default: numBytes = 3
+    let num_bytes = match length {
+        3 => 2,
+        4 => 3,
+        5 => 4,
+        6 => 4,
+        7 => 5,
+        8 => 5,
+        _ => 3,
+    };
 
     let hash_slice = &result[..num_bytes];
-    encode_base36(hash_slice, length)
+    let short_hash = encode_base36(hash_slice, length);
+
+    format!("{}-{}", prefix, short_hash)
 }
 
 #[cfg(test)]
@@ -101,13 +112,18 @@ mod tests {
     fn test_generate_hash_id_stability() {
         // Ensure deterministic output for same input
         let date = Utc.timestamp_opt(1600000000, 0).unwrap();
-        let id1 = generate_hash_id("Title", "Desc", date, "User");
-        let id2 = generate_hash_id("Title", "Desc", date, "User");
+        let id1 = generate_hash_id("bd", "Title", "Desc", "User", date, 6, 0);
+        let id2 = generate_hash_id("bd", "Title", "Desc", "User", date, 6, 0);
         assert_eq!(id1, id2);
-        assert_eq!(id1.len(), 6);
+        assert!(id1.starts_with("bd-"));
+        assert_eq!(id1.len(), 3 + 6); // prefix(2) + dash(1) + hash(6)
 
         // Ensure different output for different input
-        let id3 = generate_hash_id("Title2", "Desc", date, "User");
+        let id3 = generate_hash_id("bd", "Title2", "Desc", "User", date, 6, 0);
         assert_ne!(id1, id3);
+
+        // Ensure different output for different nonce
+        let id4 = generate_hash_id("bd", "Title", "Desc", "User", date, 6, 1);
+        assert_ne!(id1, id4);
     }
 }

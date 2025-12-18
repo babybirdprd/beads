@@ -526,8 +526,9 @@ fn main() -> anyhow::Result<()> {
 
                                  let now = Utc::now();
                                  // Use new_fm values
-                                 let id_hash = util::generate_hash_id(&new_fm.title, &description, now, "default-workspace");
-                                 let short_id = format!("bd-{}", id_hash);
+                                 let prefix = store.get_config("issue_id_prefix")?.unwrap_or_else(|| "bd".to_string());
+                                 let user = store.get_config("user.name")?.unwrap_or_else(|| "unknown".to_string());
+                                 let short_id = store.generate_unique_id(&prefix, &new_fm.title, &description, &user)?;
 
                                  let issue = Issue {
                                     id: short_id.clone(),
@@ -582,9 +583,9 @@ fn main() -> anyhow::Result<()> {
             // If description IS empty, we returned or bailed above.
             // So this path is only for non-interactive creation.
             let now = Utc::now();
-            // TODO: Real workspace ID from config
-            let id_hash = util::generate_hash_id(&title, &description, now, "default-workspace");
-            let short_id = format!("bd-{}", id_hash);
+            let prefix = store.get_config("issue_id_prefix")?.unwrap_or_else(|| "bd".to_string());
+            let user = store.get_config("user.name")?.unwrap_or_else(|| "unknown".to_string());
+            let short_id = store.generate_unique_id(&prefix, &title, &description, &user)?;
 
             let issue = Issue {
                 id: short_id.clone(),

@@ -10,14 +10,14 @@ We have established the foundational structure for the Rust port of `beads`.
 ---
 
 ## Progress Assessment
-**Overall Completion: ~15-20%**
+**Overall Completion: ~25-30%**
 
 | Component | Status | Notes |
 | :--- | :--- | :--- |
-| **Core Models** | 🟡 Partial | `Issue` struct exists but missing `Dependency`, `Label`, `Comment` types. `relates_to` is `String` instead of `Vec<String>`. |
-| **Storage** | 🟡 Partial | Basic read/write for `issues` table. Missing table joins and JSONL export. |
-| **ID Generation** | 🔴 Incorrect | Uses Hex encoding. Must port Base36 logic from `internal/storage/sqlite/ids.go`. |
-| **CLI** | 🟡 Partial | `list` and `create` work. Binary name is `beads-cli` (needs rename to `bd`). |
+| **Core Models** | 🟢 Complete | `Issue` struct updated with `Dependency`, `Comment` types. `relates_to` is `Vec<String>`. |
+| **Storage** | 🟡 Partial | Read/write works. `export_to_jsonl` implemented but needs rigorous testing against Go artifacts. |
+| **ID Generation** | 🟢 Complete | Ported Base36 logic and hash generation (prefix, length, nonce) from Go. |
+| **CLI** | 🟡 Partial | `create` uses correct ID generation. Binary name is `bd`. |
 | **Git Integration** | ⚪ Missing | No wrapper for git operations yet. |
 | **Merge Logic** | ⚪ Missing | 3-way merge algorithm not ported. |
 | **Sync Logic** | ⚪ Missing | `bd sync` command not implemented. |
@@ -26,35 +26,38 @@ We have established the foundational structure for the Rust port of `beads`.
 
 ## Next Steps for the Next Agent
 
-Your goal is to continue the port towards full feature parity, focusing on data correctness and the **Export** capability.
+Your goal is to implement Git integration and the core Sync logic.
 
-### 1. Fix ID Generation & Binary Name
-* **Binary**: Rename `beads-cli` to `bd` in `rust/beads-cli/Cargo.toml`:
-    ```toml
-    [[bin]]
-    name = "bd"
-    path = "src/main.rs"
-    ```
-* **ID Generation**: The Go app uses **Base36** encoding (`0-9`, `a-z`), **NOT** Hex.
-    * Port `encodeBase36` from `internal/storage/sqlite/ids.go` to `rust/beads-core/src/util.rs`.
-    * Ensure the hash content matches the Go format: `fmt.Sprintf("%s|%s|%s|%d|%d", ...)` (Check `ids.go` for exact format).
+### 1. Implement Git Integration
+* **Task**: Create a `git` module in `beads-core` (or a separate crate if preferred).
+* **Strategy**: Wrap `std::process::Command("git")`.
+* **Operations**: `init`, `add`, `commit`, `push`, `pull`, `status`, `rev-parse`.
+* **Reference**: See `internal/git/git.go`.
 
-### 2. Complete Domain Model
-* **Task**: Update `rust/beads-core/src/models.rs`.
-* **Changes**:
-    * Add structs: `Dependency`, `Label`, `Comment`.
-    * **Update Issue**:
-        * `relates_to`: Change to `Vec<String>` (handle parsing from DB string).
-        * Add fields: `dependencies: Vec<Dependency>`, `labels: Vec<String>`, `comments: Vec<Comment>`.
-* **Note**: This requires updating `Store::list_issues` to perform JOINs or separate queries to populate these fields.
-
-### 3. Implement JSONL Export
-* **Task**: Implement `Store::export_to_jsonl()` in `beads-core`.
+### 2. Implement Sync Logic (`bd sync`)
+* **Task**: Implement `beads_core::sync::run_sync`.
 * **Logic**:
-    * Query issues (all or dirty).
-    * Serialize to JSONL (one JSON object per line).
-    * Write to `.beads/issues.jsonl`.
-    * **Reference**: See `internal/export/executor.go` and `cmd/bd/export.go`.
+    1.  **Check for changes**: Is the DB dirty? (Check `dirty_issues` table).
+    2.  **Export**: If dirty, call `Store::export_to_jsonl`.
+    3.  **Git Add/Commit**: Add `.beads/issues.jsonl` and commit with a standard message (e.g., "update issues").
+    4.  **Pull/Merge**: Pull remote changes. If conflict, handle via 3-way merge (already partially scaffolded in `merge.rs`, but needs completion).
+    5.  **Import**: If new JSONL from remote, call `Store::import_from_jsonl`.
+
+### 3. Implement 3-Way Merge Logic
+* **Task**: Port `internal/merge/merge.go` to `rust/beads-core/src/merge.rs`.
+* **Logic**:
+    *   Compare Base (common ancestor), Left (local), and Right (remote).
+    *   Resolve conflicts field-by-field.
+    *   Handle tombstones (deletions).
+    *   This is critical for `bd sync`.
+
+### 4. Verify Cross-Language Compatibility
+* **Task**: Create a test script that:
+    1.  Creates an issue with Go `bd`.
+    2.  Reads/Updates it with Rust `bd`.
+    3.  Exports with Rust `bd`.
+    4.  Imports back with Go `bd`.
+*   Ensure hashes and content match exactly.
 
 ### 4. Implement Git Integration
 * **Task**: Create a `git` module in `beads-core`.

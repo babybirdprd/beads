@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufWriter, Write};
 use sha2::{Digest, Sha256};
+use crate::util;
 
 pub struct Store {
     conn: Connection,
@@ -518,6 +519,29 @@ impl Store {
 
         tx.commit()?;
         Ok(())
+    }
+
+    pub fn generate_unique_id(&self, prefix: &str, title: &str, description: &str, creator: &str) -> anyhow::Result<String> {
+        let created_at = Utc::now();
+        // Base length logic (simplified for now, mimicking Go's fallback)
+        let base_length = 6;
+        let max_length = 8;
+
+        for length in base_length..=max_length {
+            for nonce in 0..10 {
+                let candidate = util::generate_hash_id(prefix, title, description, creator, created_at, length, nonce);
+                let count: i64 = self.conn.query_row(
+                    "SELECT COUNT(*) FROM issues WHERE id = ?1",
+                    params![&candidate],
+                    |row| row.get(0),
+                )?;
+
+                if count == 0 {
+                    return Ok(candidate);
+                }
+            }
+        }
+        Err(anyhow::anyhow!("Failed to generate unique ID after retries"))
     }
 
     pub fn create_issue(&self, issue: &Issue) -> Result<()> {
