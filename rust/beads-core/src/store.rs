@@ -1,7 +1,7 @@
 use rusqlite::{Connection, Result, params};
 use crate::models::{Issue, Dependency, Comment};
 use chrono::{DateTime, Utc, NaiveDateTime};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufWriter, Write};
@@ -10,7 +10,6 @@ use crate::util;
 
 pub struct Store {
     conn: Connection,
-    db_path: PathBuf,
 }
 
 impl Store {
@@ -89,7 +88,6 @@ impl Store {
 
         Ok(Store {
             conn,
-            db_path: path.as_ref().to_path_buf(),
         })
     }
 

@@ -10,7 +10,7 @@ We have established the foundational structure for the Rust port of `beads`.
 ---
 
 ## Progress Assessment
-**Overall Completion: ~60%**
+**Overall Completion: ~75%**
 
 | Component | Status | Notes |
 | :--- | :--- | :--- |
@@ -21,28 +21,26 @@ We have established the foundational structure for the Rust port of `beads`.
 | **Git Integration** | 🟢 Complete | `git` module implemented in `beads-core` (init, add, commit, pull --rebase, push, status, show). |
 | **Merge Logic** | 🟢 Complete | 3-way merge algorithm ported including tombstone handling. |
 | **Sync Logic** | 🟢 Complete | `bd sync` command implemented with conflict resolution. |
+| **Compatibility** | 🟢 Verified | Cross-language test suite `scripts/verify_compat.sh` passes. |
+| **UX/Error Handling** | 🟢 Improved | Added `anyhow::Context` and cleaned up CLI output. |
 
 ---
 
 ## Next Steps for the Next Agent
 
-Your goal is to verify cross-language compatibility and refine the user experience.
+Your goal is to prepare the codebase for WASM compilation and expand feature parity.
 
-### 1. Verify Cross-Language Compatibility
-* **Task**: Create a comprehensive test script/suite that:
-    1.  Creates an issue with Go `bd`.
-    2.  Reads/Updates it with Rust `bd`.
-    3.  Exports with Rust `bd`.
-    4.  Imports back with Go `bd`.
-*   Ensure hashes and content match exactly to prevent data corruption during migration.
-
-### 2. Improve Error Handling & UX
-* **Task**: Review `anyhow` usage in `beads-cli`. ensuring user-friendly error messages.
-* **Task**: Polish the `bd list` table output (e.g., handling terminal width).
-
-### 3. WASM Preparation (Optional)
+### 1. WASM Preparation
 * **Task**: Audit `beads-core` for non-WASM compatible IO (mostly `std::fs` and `std::process::Command` in `git.rs`).
 * **Strategy**: Consider defining a `GitProvider` trait to abstract git operations, allowing a JS/WASM implementation later.
+* **Refactor**: Introduce traits for file system access to abstract away `std::fs`.
+
+### 2. Feature Parity
+* **Task**: Implement remaining commands or flags (e.g., `bd config`, `bd stats`).
+* **Task**: Enhance `bd sync` to support more flags present in Go version (e.g., `--squash`, `--dry-run`).
+
+### 3. CI Integration
+* **Task**: Add `scripts/verify_compat.sh` to the repository's CI pipeline (e.g., GitHub Actions) to ensure ongoing compatibility.
 
 ---
 

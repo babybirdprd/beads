@@ -1,9 +1,10 @@
 use clap::{Parser, Subcommand};
-use beads_core::{Store, Issue, util};
+use beads_core::{Store, Issue};
 use chrono::Utc;
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
 use std::io::Write;
+use anyhow::Context;
 
 #[derive(Parser)]
 #[command(name = "bd")]
@@ -144,10 +145,9 @@ fn main() -> anyhow::Result<()> {
         Commands::List { status, assignee, priority, type_, label, sort } => {
             let issues = store.list_issues(status.as_deref(), assignee.as_deref(), priority, type_.as_deref(), label.as_deref(), sort.as_deref())?;
 
-            use comfy_table::{Table, Row, Cell};
+            use comfy_table::{Table, Cell};
             use comfy_table::modifiers::UTF8_ROUND_CORNERS;
             use comfy_table::presets::UTF8_FULL;
-            use colored::Colorize;
 
             let mut table = Table::new();
             table.load_preset(UTF8_FULL)
@@ -235,7 +235,7 @@ fn main() -> anyhow::Result<()> {
 
                 if updated {
                     issue.updated_at = Utc::now();
-                    store.update_issue(&issue)?;
+                    store.update_issue(&issue).context("Failed to update issue")?;
                     println!("Updated issue {}", issue.id);
                 } else {
                     println!("No changes provided.");
@@ -288,7 +288,7 @@ fn main() -> anyhow::Result<()> {
                         issue.description = body_part;
                         issue.updated_at = Utc::now();
 
-                        store.update_issue(&issue)?;
+                        store.update_issue(&issue).context("Failed to update issue")?;
                         println!("Updated issue {}", issue.id);
                     } else {
                         eprintln!("Invalid format: missing frontmatter delimiters");
@@ -308,7 +308,7 @@ fn main() -> anyhow::Result<()> {
                     issue.status = "closed".to_string();
                     issue.closed_at = Some(Utc::now());
                     issue.updated_at = Utc::now();
-                    store.update_issue(&issue)?;
+                    store.update_issue(&issue).context("Failed to close issue")?;
                     println!("Closed issue {}", issue.id);
                 } else {
                     println!("Issue {} is already closed.", issue.id);
@@ -318,17 +318,11 @@ fn main() -> anyhow::Result<()> {
             }
         }
         Commands::Export { output } => {
-            store.export_to_jsonl(&output)?;
-            // Output nothing on success unless verbose?
-            // Go tool is silent on success?
-            // Go: "Exporting pending changes to JSONL..." then silent if no error.
-            // But if called via "bd export", it might be silent.
-            // beads-cli is primarily for sync, so keep it minimal.
-            // But helpful feedback is good.
+            store.export_to_jsonl(&output).context(format!("Failed to export issues to {}", output))?;
             println!("Exported issues to {}", output);
         }
         Commands::Import { input } => {
-            store.import_from_jsonl(&input)?;
+            store.import_from_jsonl(&input).context(format!("Failed to import issues from {}", input))?;
             println!("Imported issues from {}", input);
         }
         Commands::Merge { output, base, left, right, debug } => {
@@ -463,12 +457,12 @@ fn main() -> anyhow::Result<()> {
             let beads_dir = db_path.parent().unwrap();
             let git_root = beads_dir.parent().unwrap_or(std::path::Path::new("."));
             let jsonl_path = beads_dir.join("issues.jsonl");
-            beads_core::sync::run_sync(&mut store, git_root, &jsonl_path)?;
+            beads_core::sync::run_sync(&mut store, git_root, &jsonl_path).context("Sync failed")?;
             println!("Sync complete.");
         }
         Commands::Config { command } => match command {
             ConfigCommands::Set { key, value } => {
-                store.set_config(&key, &value)?;
+                store.set_config(&key, &value).context("Failed to set config")?;
                 println!("{} = {}", key, value);
             }
             ConfigCommands::Get { key } => {
@@ -563,7 +557,7 @@ fn main() -> anyhow::Result<()> {
                                     dependencies: Vec::new(),
                                     comments: Vec::new(),
                                 };
-                                store.create_issue(&issue)?;
+                                store.create_issue(&issue).context("Failed to create issue")?;
                                 println!("Created issue {}", short_id);
                                 return Ok(());
                              },
@@ -621,7 +615,7 @@ fn main() -> anyhow::Result<()> {
                 comments: Vec::new(),
             };
 
-            store.create_issue(&issue)?;
+            store.create_issue(&issue).context("Failed to create issue")?;
             println!("Created issue {}", short_id);
         }
     }
