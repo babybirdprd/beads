@@ -1,19 +1,32 @@
-use rusqlite::{Connection, Result};
-use crate::models::{Issue};
+use rusqlite::{Connection, Result, params};
+use crate::models::{Issue, Dependency, Comment};
 use chrono::{DateTime, Utc, NaiveDateTime};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use sha2::{Digest, Sha256};
 
 pub struct Store {
     conn: Connection,
+    db_path: PathBuf,
 }
 
 impl Store {
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
-        let conn = Connection::open(path)?;
-        Ok(Store { conn })
+        let conn = Connection::open(&path)?;
+        Ok(Store {
+            conn,
+            db_path: path.as_ref().to_path_buf(),
+        })
+    }
+
+    pub fn execute_raw(&self, sql: &str) -> Result<()> {
+        self.conn.execute_batch(sql)
     }
 
     pub fn list_issues(&self) -> Result<Vec<Issue>> {
+        // Basic list for CLI "bd list" - mostly subset of fields
         let mut stmt = self.conn.prepare(
             "SELECT id, title, description, status, priority, issue_type, created_at, updated_at
              FROM issues"
@@ -46,9 +59,18 @@ impl Store {
                 sender: String::new(),
                 ephemeral: false,
                 replies_to: String::new(),
-                relates_to: String::new(),
+                relates_to: Vec::new(),
                 duplicate_of: String::new(),
                 superseded_by: String::new(),
+
+                deleted_at: None,
+                deleted_by: String::new(),
+                delete_reason: String::new(),
+                original_type: String::new(),
+
+                labels: Vec::new(),
+                dependencies: Vec::new(),
+                comments: Vec::new(),
             })
         })?;
 
@@ -60,10 +82,23 @@ impl Store {
     }
 
     pub fn create_issue(&self, issue: &Issue) -> Result<()> {
+        // Serialize nested fields
+        let relates_to_json = serde_json::to_string(&issue.relates_to).unwrap_or_default();
+
         self.conn.execute(
-            "INSERT INTO issues (id, title, description, status, priority, issue_type, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            (
+            "INSERT INTO issues (
+                id, title, description, status, priority, issue_type,
+                created_at, updated_at, closed_at, external_ref,
+                sender, ephemeral, replies_to, relates_to, duplicate_of, superseded_by,
+                deleted_at, deleted_by, delete_reason, original_type
+            )
+             VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6,
+                ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14, ?15, ?16,
+                ?17, ?18, ?19, ?20
+            )",
+            params![
                 &issue.id,
                 &issue.title,
                 &issue.description,
@@ -72,14 +107,237 @@ impl Store {
                 &issue.issue_type,
                 issue.created_at.to_rfc3339(),
                 issue.updated_at.to_rfc3339(),
-            ),
+                issue.closed_at.map(|t| t.to_rfc3339()),
+                &issue.external_ref,
+                &issue.sender,
+                issue.ephemeral,
+                &issue.replies_to,
+                relates_to_json,
+                &issue.duplicate_of,
+                &issue.superseded_by,
+                issue.deleted_at.map(|t| t.to_rfc3339()),
+                &issue.deleted_by,
+                &issue.delete_reason,
+                &issue.original_type,
+            ],
         )?;
+
+        // Insert labels
+        for label in &issue.labels {
+            self.conn.execute(
+                "INSERT INTO labels (issue_id, label) VALUES (?1, ?2)",
+                params![&issue.id, label],
+            )?;
+        }
+
+        // Insert dependencies
+        for dep in &issue.dependencies {
+            self.conn.execute(
+                "INSERT INTO dependencies (issue_id, depends_on_id, type, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![&dep.issue_id, &dep.depends_on_id, &dep.type_, dep.created_at.to_rfc3339(), &dep.created_by],
+            )?;
+        }
+
+        // Insert comments
+        for comment in &issue.comments {
+            self.conn.execute(
+                "INSERT INTO comments (issue_id, author, text, created_at) VALUES (?1, ?2, ?3, ?4)",
+                params![&comment.issue_id, &comment.author, &comment.text, comment.created_at.to_rfc3339()],
+            )?;
+        }
+
         // Mark as dirty so Go 'bd export' picks it up
         self.conn.execute(
             "INSERT OR IGNORE INTO dirty_issues (issue_id) VALUES (?1)",
-            (&issue.id,),
+            params![&issue.id],
         )?;
         Ok(())
+    }
+
+    pub fn export_to_jsonl<P: AsRef<Path>>(&self, jsonl_path: P) -> anyhow::Result<()> {
+        let issues = self.export_all_issues()?;
+        let jsonl_path = jsonl_path.as_ref();
+
+        // Write to temp file
+        let dir = jsonl_path.parent().unwrap_or_else(|| Path::new("."));
+        let file_name = jsonl_path.file_name().unwrap_or_default();
+        let temp_path = dir.join(format!(".{}.tmp", file_name.to_string_lossy()));
+
+        {
+            let file = File::create(&temp_path)?;
+            let mut writer = BufWriter::new(file);
+
+            for issue in &issues {
+                let json = serde_json::to_string(issue)?;
+                writeln!(writer, "{}", json)?;
+            }
+            writer.flush()?;
+        } // file closed here
+
+        // Rename temp file to target
+        std::fs::rename(&temp_path, jsonl_path)?;
+
+        // Compute hash of the new file
+        let mut file = File::open(jsonl_path)?;
+        let mut hasher = Sha256::new();
+        std::io::copy(&mut file, &mut hasher)?;
+        let hash = hex::encode(hasher.finalize());
+
+        // Update metadata and clear dirty
+        self.conn.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+            params!["jsonl_content_hash", &hash],
+        )?;
+
+        // Clear dirty issues
+        self.conn.execute("DELETE FROM dirty_issues", [])?;
+
+        // Update database mtime (touch) to match JSONL (prevent drift)
+        // We'll skip explicit touch for now as DB write above updates mtime.
+
+        Ok(())
+    }
+
+    fn export_all_issues(&self) -> Result<Vec<Issue>> {
+        // Fetch all related data first (bulk)
+        let labels_map = self.get_all_labels()?;
+        let deps_map = self.get_all_dependencies()?;
+        let comments_map = self.get_all_comments()?;
+
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                id, content_hash, title, description, design, acceptance_criteria, notes,
+                status, priority, issue_type, assignee, estimated_minutes,
+                created_at, updated_at, closed_at, external_ref,
+                sender, ephemeral, replies_to, relates_to, duplicate_of, superseded_by,
+                deleted_at, deleted_by, delete_reason, original_type
+             FROM issues
+             ORDER BY id"
+        )?;
+
+        let issue_iter = stmt.query_map([], |row| {
+            let id: String = row.get(0)?;
+            let created_at_s: String = row.get(12)?;
+            let updated_at_s: String = row.get(13)?;
+            let closed_at_s: Option<String> = row.get(14)?;
+            let deleted_at_s: Option<String> = row.get(22)?;
+
+            let created_at = parse_timestamp(&created_at_s).unwrap_or_else(|| Utc::now());
+            let updated_at = parse_timestamp(&updated_at_s).unwrap_or_else(|| Utc::now());
+            let closed_at = closed_at_s.and_then(|s| parse_timestamp(&s));
+            let deleted_at = deleted_at_s.and_then(|s| parse_timestamp(&s));
+
+            let relates_to_s: String = row.get(19).unwrap_or_default();
+            let relates_to = if relates_to_s.is_empty() {
+                Vec::new()
+            } else {
+                serde_json::from_str(&relates_to_s).unwrap_or_default()
+            };
+
+            Ok(Issue {
+                id: id.clone(),
+                content_hash: row.get(1).unwrap_or_default(),
+                title: row.get(2).unwrap_or_default(),
+                description: row.get(3).unwrap_or_default(),
+                design: row.get(4).unwrap_or_default(),
+                acceptance_criteria: row.get(5).unwrap_or_default(),
+                notes: row.get(6).unwrap_or_default(),
+                status: row.get(7).unwrap_or_default(),
+                priority: row.get(8).unwrap_or_default(),
+                issue_type: row.get(9).unwrap_or_default(),
+                assignee: row.get(10)?,
+                estimated_minutes: row.get(11)?,
+                created_at,
+                updated_at,
+                closed_at,
+                external_ref: row.get(15)?,
+                sender: row.get(16).unwrap_or_default(),
+                ephemeral: row.get(17).unwrap_or(false),
+                replies_to: row.get(18).unwrap_or_default(),
+                relates_to,
+                duplicate_of: row.get(20).unwrap_or_default(),
+                superseded_by: row.get(21).unwrap_or_default(),
+
+                deleted_at,
+                deleted_by: row.get(23).unwrap_or_default(),
+                delete_reason: row.get(24).unwrap_or_default(),
+                original_type: row.get(25).unwrap_or_default(),
+
+                labels: labels_map.get(&id).cloned().unwrap_or_default(),
+                dependencies: deps_map.get(&id).cloned().unwrap_or_default(),
+                comments: comments_map.get(&id).cloned().unwrap_or_default(),
+            })
+        })?;
+
+        let mut issues = Vec::new();
+        for issue in issue_iter {
+            issues.push(issue?);
+        }
+        Ok(issues)
+    }
+
+    fn get_all_labels(&self) -> Result<HashMap<String, Vec<String>>> {
+        let mut stmt = self.conn.prepare("SELECT issue_id, label FROM labels")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut map: HashMap<String, Vec<String>> = HashMap::new();
+        for row in rows {
+            let (id, label) = row?;
+            map.entry(id).or_default().push(label);
+        }
+        Ok(map)
+    }
+
+    fn get_all_dependencies(&self) -> Result<HashMap<String, Vec<Dependency>>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT issue_id, depends_on_id, type, created_at, created_by FROM dependencies"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let created_at_s: String = row.get(3)?;
+            let created_at = parse_timestamp(&created_at_s).unwrap_or_else(|| Utc::now());
+
+            Ok(Dependency {
+                issue_id: row.get(0)?,
+                depends_on_id: row.get(1)?,
+                type_: row.get(2)?,
+                created_at,
+                created_by: row.get(4)?,
+            })
+        })?;
+
+        let mut map: HashMap<String, Vec<Dependency>> = HashMap::new();
+        for row in rows {
+            let dep = row?;
+            map.entry(dep.issue_id.clone()).or_default().push(dep);
+        }
+        Ok(map)
+    }
+
+    fn get_all_comments(&self) -> Result<HashMap<String, Vec<Comment>>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, issue_id, author, text, created_at FROM comments"
+        )?;
+        let rows = stmt.query_map([], |row| {
+            let created_at_s: String = row.get(4)?;
+            let created_at = parse_timestamp(&created_at_s).unwrap_or_else(|| Utc::now());
+
+            Ok(Comment {
+                id: row.get(0)?,
+                issue_id: row.get(1)?,
+                author: row.get(2)?,
+                text: row.get(3)?,
+                created_at,
+            })
+        })?;
+
+        let mut map: HashMap<String, Vec<Comment>> = HashMap::new();
+        for row in rows {
+            let comment = row?;
+            map.entry(comment.issue_id.clone()).or_default().push(comment);
+        }
+        Ok(map)
     }
 }
 
