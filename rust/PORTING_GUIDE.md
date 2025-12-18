@@ -23,6 +23,7 @@ We have established the foundational structure for the Rust port of `beads`.
 | **Sync Logic** | 🟢 Complete | `bd sync` command implemented with conflict resolution. |
 | **Compatibility** | 🟢 Verified | Cross-language test suite `scripts/verify_compat.sh` passes. |
 | **UX/Error Handling** | 🟢 Improved | Added `anyhow::Context` and cleaned up CLI output. |
+| **WASM Prep** | 🟢 Complete | `FileSystem` trait abstracts IO in `beads-core` (store, sync, merge). |
 
 ---
 
@@ -30,9 +31,10 @@ We have established the foundational structure for the Rust port of `beads`.
 
 Your goal is to prepare the codebase for WASM compilation and expand feature parity.
 
-### 1. WASM Preparation
-* **Task**: Audit `beads-core` for remaining non-WASM compatible IO (mostly `std::fs` in `sync.rs` and `store.rs`).
-* **Refactor**: Introduce traits for file system access to abstract away `std::fs`.
+### 1. WASM Compilation
+* **Task**: Add `wasm32-unknown-unknown` target support.
+* **Task**: Replace `rusqlite` with a WASM-compatible SQLite binding (e.g., `sqlite-wasm` or similar) or verify `rusqlite` bundled mode works with WASM.
+* **Task**: Verify `StdGit` is avoided or stubbed in WASM builds (since `std::process::Command` won't work).
 
 ### 2. Feature Parity
 * **Task**: Implement remaining commands or flags (e.g., `bd config`, `bd stats`).
@@ -46,6 +48,7 @@ Your goal is to prepare the codebase for WASM compilation and expand feature par
 ## Architecture Notes
 * **No Daemon**: We are intentionally dropping the Daemon/RPC architecture. Use SQLite file locking for concurrency safety.
 * **WASM Goal**: Keep `beads-core` pure Rust where possible. Abstract IO and Git operations to allow future WASM compilation.
+* **IO Abstraction**: `beads-core` uses the `FileSystem` trait for all file operations. Concrete implementations (like `StdFileSystem`) are injected at runtime.
 
 ## Helpful Commands
 * **Build**: `cd rust && cargo build`
