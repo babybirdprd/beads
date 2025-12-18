@@ -7,4 +7,4 @@ pub mod sync;
 
 pub use models::*;
 pub use store::Store;
-pub use git::Git;
+pub use git::{GitOps, StdGit};
