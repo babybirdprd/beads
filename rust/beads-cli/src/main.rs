@@ -24,6 +24,10 @@ enum Commands {
         priority: Option<i32>,
         #[arg(long = "type")]
         type_: Option<String>,
+        #[arg(long)]
+        label: Option<String>,
+        #[arg(long)]
+        sort: Option<String>,
     },
     Show {
         id: String,
@@ -137,13 +141,47 @@ fn main() -> anyhow::Result<()> {
     let mut store = Store::open(&db_path).map_err(|e| anyhow::anyhow!("Failed to open DB at {:?}: {}", db_path, e))?;
 
     match cli.command {
-        Commands::List { status, assignee, priority, type_ } => {
-            let issues = store.list_issues(status.as_deref(), assignee.as_deref(), priority, type_.as_deref())?;
-            println!("{:<10} {:<10} {:<10} {}", "ID", "STATUS", "PRIORITY", "TITLE");
-            println!("{:-<60}", "");
+        Commands::List { status, assignee, priority, type_, label, sort } => {
+            let issues = store.list_issues(status.as_deref(), assignee.as_deref(), priority, type_.as_deref(), label.as_deref(), sort.as_deref())?;
+
+            use comfy_table::{Table, Row, Cell};
+            use comfy_table::modifiers::UTF8_ROUND_CORNERS;
+            use comfy_table::presets::UTF8_FULL;
+            use colored::Colorize;
+
+            let mut table = Table::new();
+            table.load_preset(UTF8_FULL)
+                 .apply_modifier(UTF8_ROUND_CORNERS)
+                 .set_content_arrangement(comfy_table::ContentArrangement::Dynamic);
+
+            table.set_header(vec!["ID", "Status", "Priority", "Title"]);
+
             for issue in issues {
-                println!("{:<10} {:<10} {:<10} {}", issue.id, issue.status, issue.priority, issue.title);
+                let status_str = issue.status.clone();
+                let status_cell = if status_str == "bug" {
+                    Cell::new(&status_str).fg(comfy_table::Color::Red)
+                } else if status_str == "closed" {
+                    Cell::new(&status_str).fg(comfy_table::Color::Green)
+                } else if status_str == "open" {
+                    Cell::new(&status_str).fg(comfy_table::Color::Yellow)
+                } else {
+                     Cell::new(&status_str)
+                };
+
+                let title_truncated = if issue.title.len() > 60 {
+                    format!("{}...", &issue.title[..57])
+                } else {
+                    issue.title.clone()
+                };
+
+                table.add_row(vec![
+                    Cell::new(&issue.id),
+                    status_cell,
+                    Cell::new(issue.priority),
+                    Cell::new(title_truncated),
+                ]);
             }
+            println!("{}", table);
         }
         Commands::Show { id } => {
             if let Some(issue) = store.get_issue(&id)? {
@@ -384,7 +422,7 @@ fn main() -> anyhow::Result<()> {
             // Given the limited "list_issues" SQL generation I wrote (AND logic), fetching all then filtering is safest without changing Store again.
             // Wait, I can pass None for status (all) and filter in loop.
 
-            let all_issues = store.list_issues(None, None, None, None)?;
+            let all_issues = store.list_issues(None, None, None, None, None, None)?;
 
             println!("Ready issues for {}:", assignee);
             println!("{:<10} {:<10} {:<10} {}", "ID", "STATUS", "PRIORITY", "TITLE");

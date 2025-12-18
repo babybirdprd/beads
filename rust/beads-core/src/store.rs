@@ -315,83 +315,62 @@ impl Store {
         }))
     }
 
-    pub fn list_issues(&self, status: Option<&str>, assignee: Option<&str>, priority: Option<i32>, issue_type: Option<&str>) -> Result<Vec<Issue>> {
-        // Build query dynamically
-        let mut sql = "SELECT id, title, description, status, priority, issue_type, created_at, updated_at, assignee FROM issues WHERE 1=1".to_string();
-        let mut params = Vec::new();
-
-        if let Some(s) = status {
-            sql.push_str(" AND status = ?");
-            params.push(s.to_string());
-        }
-        if let Some(a) = assignee {
-            if a == "unassigned" {
-                sql.push_str(" AND (assignee IS NULL OR assignee = '')");
-            } else {
-                sql.push_str(" AND assignee = ?");
-                params.push(a.to_string());
-            }
-        }
-        // Special handling for priority/type to match CLI types if needed, but for now simple string/int binding
-        if let Some(p) = priority {
-            sql.push_str(" AND priority = ?");
-            // params is Vec<String>, but we need to bind int.
-            // rusqlite parameters are tricky with dynamic queries and mixed types if using positional params vector.
-            // A common workaround is to convert all to explicit dyn ToSql or handle bindings manually.
-            // Since we only have a few filters, let's use named parameters or rebuild params vector to be `&[&dyn ToSql]`.
-            // But Vec<&dyn ToSql> is hard to manage with lifetimes of values.
-            // Let's stick to the simpler approach: keep params separate and bind by index.
-        }
-        // Let's restart the approach to be safer with rusqlite.
-
-        // We will construct the SQL string and a separate list of parameter values (as enum/trait objects).
-
-        // However, rusqlite's query method takes params! or [] which expects things that implement ToSql.
-        // It's easier to just construct the query string with values embedded if they are safe, BUT that's SQL injection risk.
-        // So we MUST use parameters.
-
-        // Let's assume we won't have too many combinations and use a simpler logic or a builder.
-        // Or simply:
-
+    pub fn list_issues(&self, status: Option<&str>, assignee: Option<&str>, priority: Option<i32>, issue_type: Option<&str>, label: Option<&str>, sort_by: Option<&str>) -> Result<Vec<Issue>> {
         let mut conditions = Vec::new();
         let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
         if let Some(s) = status {
-            conditions.push("status = ?");
+            conditions.push("issues.status = ?");
             args.push(Box::new(s.to_string()));
         }
 
         if let Some(a) = assignee {
             if a == "unassigned" {
-                conditions.push("(assignee IS NULL OR assignee = '')");
+                conditions.push("(issues.assignee IS NULL OR issues.assignee = '')");
             } else {
-                conditions.push("assignee = ?");
+                conditions.push("issues.assignee = ?");
                 args.push(Box::new(a.to_string()));
             }
         }
 
         if let Some(p) = priority {
-            conditions.push("priority = ?");
+            conditions.push("issues.priority = ?");
             args.push(Box::new(p));
         }
 
         if let Some(t) = issue_type {
-            conditions.push("issue_type = ?");
+            conditions.push("issues.issue_type = ?");
             args.push(Box::new(t.to_string()));
         }
 
-        let mut sql = "SELECT id, title, description, status, priority, issue_type, created_at, updated_at, assignee FROM issues".to_string();
+        // We'll construct the query starting with FROM issues
+        // If we filter by label, we need a JOIN or EXISTS.
+        // JOIN is often simpler for filtering.
+        let mut sql = "SELECT issues.id, issues.title, issues.description, issues.status, issues.priority, issues.issue_type, issues.created_at, issues.updated_at, issues.assignee FROM issues".to_string();
+
+        if let Some(l) = label {
+            sql.push_str(" INNER JOIN labels ON issues.id = labels.issue_id");
+            conditions.push("labels.label = ?");
+            args.push(Box::new(l.to_string()));
+        }
+
         if !conditions.is_empty() {
             sql.push_str(" WHERE ");
             sql.push_str(&conditions.join(" AND "));
         }
-        sql.push_str(" ORDER BY created_at DESC");
+
+        // Sorting
+        // Default: created_at DESC
+        let order_clause = match sort_by {
+            Some("updated") => "ORDER BY issues.updated_at DESC",
+            Some("created") => "ORDER BY issues.created_at DESC",
+            Some("priority") => "ORDER BY issues.priority ASC, issues.created_at DESC", // Assuming lower # is higher priority or just grouping by priority
+            _ => "ORDER BY issues.created_at DESC",
+        };
+        sql.push_str(" ");
+        sql.push_str(order_clause);
 
         let mut stmt = self.conn.prepare(&sql)?;
-
-        // We need to convert Vec<Box<dyn ToSql>> to slice of references.
-        // This is a bit annoying in Rust.
-        // Workaround: `rusqlite::params_from_iter`.
 
         let issue_iter = stmt.query_map(rusqlite::params_from_iter(args.iter()), |row| {
             let created_at_s: String = row.get(6)?;
