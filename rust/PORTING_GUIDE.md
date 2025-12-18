@@ -1,36 +1,42 @@
 # Rust Porting Guide
 
-## Current Status (Sync, Export, Import, Config Implemented)
-We have achieved the major milestones: **Sync, Export, Import, Config**.
+## Current Status (Fully Implemented CLI Commands)
+We have achieved feature parity for the core CLI workflow:
 - **beads-core**:
-    - `Store::import_from_jsonl` implements strict sync (clearing child tables to match JSONL source of truth).
-    - `Store` schema initialization is handled in `open()`.
+    - `Store::import_from_jsonl` implements strict sync.
+    - `Store::get_issue`, `Store::update_issue` support reading and modifying issues.
+    - `Store::list_issues` supports filtering by status, assignee, priority, and type.
     - `merge` module has unit tests covering conflicts and tombstones.
-    - `tracing` is used for logging.
 - **beads-cli** (binary `bd`):
-    - Implements `sync`, `export`, `import`, `list`, `create`, `config`, `merge`.
-    - `bd config` manages key-value pairs in SQLite.
+    - **Management**: `create`, `show`, `update`, `close`.
+    - **Workflow**: `list` (with filters), `ready` (personal backlog), `onboard` (wizard).
+    - **Sync**: `sync`, `export`, `import`, `merge`.
+    - **Config**: `config set/get/list`.
 
 ## Continuation Prompt / Next Steps
 
-Your goal is to implement the user-facing issue management commands to reach feature parity with the Go tool's daily workflow.
+Your goal is to refine the user experience and ensure robustness through comprehensive testing and interactive features.
 
-### 1. Implement Issue Management Commands
-The CLI lacks commands for viewing and modifying existing issues.
-- **Task**: Implement `bd show <id>`, `bd update <id>`, `bd close <id>`.
+### 1. Interactive Editing & Usability
+The current `bd create` and `bd update` rely on command-line flags.
+- **Task**: Implement `bd edit <id>` to open the issue description (and potentially other fields via frontmatter) in the user's `$EDITOR`.
+- **Task**: Enhance `bd create` to launch the editor if the description flag is omitted.
 - **Logic**:
-    - `show`: Fetch issue by ID (or short hash) and display details (including comments/deps).
-    - `update`: Modify fields (title, desc, status, etc.). Ensure update marks as dirty so it exports.
-    - `close`: Shortcut for update status=closed.
-- **Reference**: See `cmd/bd/show.go`, `cmd/bd/update.go` in Go.
+    - Detect `$EDITOR` or fallback to `vi/nano`.
+    - Create a temp file with the current description.
+    - Wait for editor process to exit.
+    - Read content and update the issue.
 
-### 2. Implement `bd ready` and Filtering
-`bd list` currently dumps everything.
-- **Task**: Implement `bd list --status <status> --assignee <user>` filtering.
-- **Task**: Implement `bd ready` (alias for listing open issues assigned to user or unassigned?).
+### 2. Comprehensive CLI Testing
+We have unit tests for `beads-core`, but `beads-cli` lacks integration tests.
+- **Task**: Add integration tests using `assert_cmd` or a shell script harness to verify CLI behavior.
+    - Test `bd onboard` in a temp directory.
+    - Test the full lifecycle: `create` -> `show` -> `update` -> `close`.
+    - Verify `sync` creates valid JSONL.
 
-### 3. Implement `bd onboard`
-- **Task**: Create a wizard to set up `.beads` repo, git config, and initial user config.
+### 3. Cross-Platform & Path Handling
+- **Task**: Verify `bd onboard` and path handling on non-Unix systems (if relevant) or ensure robust handling of `.beads` directory paths in nested subdirectories.
+- **Check**: Ensure `find_db_path` correctly locates the DB when running from a subdirectory.
 
 ## Architecture Notes
 - **No Daemon**: We are intentionally dropping the Daemon/RPC architecture. Use SQLite file locking for concurrency safety.
