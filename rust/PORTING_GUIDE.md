@@ -10,7 +10,7 @@ We have established the foundational structure for the Rust port of `beads`.
 ---
 
 ## Progress Assessment
-**Overall Completion: ~80%**
+**Overall Completion: ~85%**
 
 | Component | Status | Notes |
 | :--- | :--- | :--- |
