@@ -1,5 +1,5 @@
 use crate::{Store, GitOps};
-use crate::fs::{FileSystem, StdFileSystem};
+use crate::fs::FileSystem;
 use crate::merge::merge3way;
 use anyhow::{Result, Context, bail};
 use std::path::Path;
