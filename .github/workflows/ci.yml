@@ -139,6 +139,45 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
+  test-rust-compat:
+    name: Test Rust & Compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+            toolchain: stable
+            components: clippy, rustfmt
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "CI Bot"
+          git config --global user.email "ci@beads.test"
+
+      - name: Build Rust
+        run: |
+          cd rust
+          cargo build --release --verbose
+          cp target/release/bd ../bd-rust
+
+      - name: Test Rust
+        run: |
+          cd rust
+          cargo test --verbose
+
+      - name: Build Go
+        run: go build -o bd-go ./cmd/bd
+
+      - name: Run Compatibility Verification
+        run: ./scripts/verify_compat.sh
+
   test-nix:
     name: Test Nix Flake
     runs-on: ubuntu-latest

@@ -24,6 +24,7 @@ We have established the foundational structure for the Rust port of `beads`.
 | **Compatibility** | 🟢 Verified | Cross-language test suite `scripts/verify_compat.sh` passes. |
 | **UX/Error Handling** | 🟢 Improved | Added `anyhow::Context` and cleaned up CLI output. |
 | **WASM Prep** | 🟢 Complete | `FileSystem` trait abstracts IO in `beads-core` (store, sync, merge). |
+| **CI Integration** | 🟢 Complete | Added `test-rust-compat` job to GitHub Actions. |
 
 ---
 
@@ -38,9 +39,6 @@ Your goal is to prepare the codebase for WASM compilation and expand feature par
 
 ### 2. Feature Parity
 * **Task**: Enhance `bd sync` to support more flags present in Go version (e.g., `--squash`, `--dry-run`).
-
-### 3. CI Integration
-* **Task**: Add `scripts/verify_compat.sh` to the repository's CI pipeline (e.g., GitHub Actions) to ensure ongoing compatibility.
 
 ---
 
