@@ -17,7 +17,7 @@ We have established the foundational structure for the Rust port of `beads`.
 | **Core Models** | 🟢 Complete | `Issue` struct updated with `Dependency`, `Comment` types. `relates_to` is `Vec<String>`. |
 | **Storage** | 🟢 Complete | Read/write works. `export_to_jsonl` implemented. |
 | **ID Generation** | 🟢 Complete | Ported Base36 logic and hash generation (prefix, length, nonce) from Go. |
-| **CLI** | 🟢 Complete | `create`, `list`, `sync` commands implemented. Binary name is `bd`. |
+| **CLI** | 🟢 Complete | `create`, `list`, `sync`, `config`, `stats` commands implemented. Binary name is `bd`. |
 | **Git Integration** | 🟢 Complete | `GitOps` trait implemented in `beads-core`. `StdGit` provides `std::process::Command` implementation. |
 | **Merge Logic** | 🟢 Complete | 3-way merge algorithm ported including tombstone handling. |
 | **Sync Logic** | 🟢 Complete | `bd sync` command implemented with conflict resolution. |
@@ -37,7 +37,6 @@ Your goal is to prepare the codebase for WASM compilation and expand feature par
 * **Task**: Verify `StdGit` is avoided or stubbed in WASM builds (since `std::process::Command` won't work).
 
 ### 2. Feature Parity
-* **Task**: Implement remaining commands or flags (e.g., `bd config`, `bd stats`).
 * **Task**: Enhance `bd sync` to support more flags present in Go version (e.g., `--squash`, `--dry-run`).
 
 ### 3. CI Integration
