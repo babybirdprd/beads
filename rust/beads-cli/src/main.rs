@@ -82,6 +82,7 @@ enum Commands {
     Onboard,
     Ready,
     Sync,
+    Stats,
     Config {
         #[command(subcommand)]
         command: ConfigCommands,
@@ -464,6 +465,45 @@ fn main() -> anyhow::Result<()> {
             let fs = StdFileSystem;
             beads_core::sync::run_sync(&mut store, &git, git_root, &jsonl_path, &fs).context("Sync failed")?;
             println!("Sync complete.");
+        }
+        Commands::Stats => {
+            let issues = store.list_issues(None, None, None, None, None, None)?;
+            let total = issues.len();
+            let mut by_status = std::collections::HashMap::new();
+            let mut by_assignee = std::collections::HashMap::new();
+            let mut by_priority = std::collections::HashMap::new();
+            let mut by_type = std::collections::HashMap::new();
+
+            for issue in issues {
+                *by_status.entry(issue.status).or_insert(0) += 1;
+                *by_assignee.entry(issue.assignee.unwrap_or_else(|| "unassigned".to_string())).or_insert(0) += 1;
+                *by_priority.entry(issue.priority).or_insert(0) += 1;
+                *by_type.entry(issue.issue_type).or_insert(0) += 1;
+            }
+
+            println!("Total Issues: {}", total);
+
+            println!("\nBy Status:");
+            for (k, v) in &by_status {
+                println!("  {:<12} {}", k, v);
+            }
+
+            println!("\nBy Priority:");
+            let mut priorities: Vec<_> = by_priority.iter().collect();
+            priorities.sort_by_key(|(k, _)| **k);
+            for (k, v) in priorities {
+                println!("  {:<12} {}", k, v);
+            }
+
+            println!("\nBy Type:");
+            for (k, v) in &by_type {
+                println!("  {:<12} {}", k, v);
+            }
+
+            println!("\nBy Assignee:");
+            for (k, v) in &by_assignee {
+                println!("  {:<12} {}", k, v);
+            }
         }
         Commands::Config { command } => match command {
             ConfigCommands::Set { key, value } => {
