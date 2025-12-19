@@ -1172,6 +1172,13 @@ func TestCheckSyncBranchHookCompatibility(t *testing.T) {
 					t.Fatal(err)
 				}
 
+				// Ensure core.hooksPath doesn't interfere
+				cmd = exec.Command("git", "config", "core.hooksPath", ".git/hooks")
+				cmd.Dir = tmpDir
+				if err := cmd.Run(); err != nil {
+					t.Fatal(err)
+				}
+
 				// Create pre-push hook if specified
 				if tc.hookVersion != "" {
 					hooksDir := filepath.Join(tmpDir, ".git", "hooks")
@@ -1239,6 +1246,13 @@ func TestCheckSyncBranchHookQuick(t *testing.T) {
 			if tc.hasGitDir {
 				// Initialize a real git repo (git rev-parse needs this)
 				cmd := exec.Command("git", "init")
+				cmd.Dir = tmpDir
+				if err := cmd.Run(); err != nil {
+					t.Fatal(err)
+				}
+
+				// Ensure core.hooksPath doesn't interfere
+				cmd = exec.Command("git", "config", "core.hooksPath", ".git/hooks")
 				cmd.Dir = tmpDir
 				if err := cmd.Run(); err != nil {
 					t.Fatal(err)
