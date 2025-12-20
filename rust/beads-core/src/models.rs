@@ -31,7 +31,9 @@ pub struct Issue {
     #[serde(skip)]
     pub content_hash: String,
 
+    #[serde(default)]
     pub title: String,
+    #[serde(default)]
     pub description: String,
 
     #[serde(default)]
@@ -43,8 +45,11 @@ pub struct Issue {
     #[serde(default)]
     pub notes: String,
 
+    #[serde(default)]
     pub status: Status,
+    #[serde(default)]
     pub priority: i32,
+    #[serde(default)]
     pub issue_type: IssueType,
 
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,7 +58,9 @@ pub struct Issue {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_minutes: Option<i32>,
 
+    #[serde(default = "Utc::now")]
     pub created_at: DateTime<Utc>,
+    #[serde(default = "Utc::now")]
     pub updated_at: DateTime<Utc>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
