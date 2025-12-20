@@ -47,6 +47,16 @@ enum Commands {
         type_: Option<String>,
         #[arg(long)]
         assignee: Option<String>,
+
+        #[arg(long, action = clap::ArgAction::Append)]
+        add_label: Vec<String>,
+        #[arg(long, action = clap::ArgAction::Append)]
+        remove_label: Vec<String>,
+
+        #[arg(long, action = clap::ArgAction::Append, alias = "depends-on")]
+        add_dependency: Vec<String>,
+        #[arg(long, action = clap::ArgAction::Append)]
+        remove_dependency: Vec<String>,
     },
     Edit {
         id: String,
@@ -97,6 +107,18 @@ enum ConfigCommands {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct FrontmatterDependency {
+    id: String,
+    #[serde(default = "default_dep_type")]
+    #[serde(rename = "type")]
+    dep_type: String,
+}
+
+fn default_dep_type() -> String {
+    "blocking".to_string()
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct IssueFrontmatter {
     title: String,
     status: String,
@@ -105,6 +127,10 @@ struct IssueFrontmatter {
     issue_type: String,
     #[serde(default)]
     assignee: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    labels: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dependencies: Vec<FrontmatterDependency>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -221,22 +247,103 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("Issue not found: {}", id);
             }
         }
-        Commands::Update { id, title, description, status, priority, type_, assignee } => {
+        Commands::Update {
+            id,
+            title,
+            description,
+            status,
+            priority,
+            type_,
+            assignee,
+            add_label,
+            remove_label,
+            add_dependency,
+            remove_dependency,
+        } => {
             if let Some(mut issue) = store.get_issue(&id)? {
                 let mut updated = false;
-                if let Some(t) = title { issue.title = t; updated = true; }
-                if let Some(d) = description { issue.description = d; updated = true; }
-                if let Some(s) = status { issue.status = s; updated = true; }
-                if let Some(p) = priority { issue.priority = p; updated = true; }
-                if let Some(t) = type_ { issue.issue_type = t; updated = true; }
+                let user_name = store.get_config("user.name")?.unwrap_or_else(|| "unknown".to_string());
+
+                if let Some(t) = title {
+                    issue.title = t;
+                    updated = true;
+                }
+                if let Some(d) = description {
+                    issue.description = d;
+                    updated = true;
+                }
+                if let Some(s) = status {
+                    issue.status = s;
+                    updated = true;
+                }
+                if let Some(p) = priority {
+                    issue.priority = p;
+                    updated = true;
+                }
+                if let Some(t) = type_ {
+                    issue.issue_type = t;
+                    updated = true;
+                }
                 if let Some(a) = assignee {
                     issue.assignee = if a.is_empty() { None } else { Some(a) };
                     updated = true;
                 }
 
+                // Handle Labels
+                for label in add_label {
+                    if !issue.labels.contains(&label) {
+                        issue.labels.push(label);
+                        updated = true;
+                    }
+                }
+                for label in remove_label {
+                    if let Some(pos) = issue.labels.iter().position(|l| l == &label) {
+                        issue.labels.remove(pos);
+                        updated = true;
+                    }
+                }
+
+                // Handle Dependencies
+                for dep_str in add_dependency {
+                    // Format: "ID" or "ID:TYPE"
+                    let parts: Vec<&str> = dep_str.splitn(2, ':').collect();
+                    let (dep_id, dep_type) = if parts.len() == 2 {
+                        (parts[0], parts[1])
+                    } else {
+                        (parts[0], "blocking")
+                    };
+
+                    // Check if exists
+                    if !issue
+                        .dependencies
+                        .iter()
+                        .any(|d| d.depends_on_id == dep_id && d.type_ == dep_type)
+                    {
+                        use beads_core::models::Dependency;
+                        issue.dependencies.push(Dependency {
+                            issue_id: issue.id.clone(),
+                            depends_on_id: dep_id.to_string(),
+                            type_: dep_type.to_string(),
+                            created_at: Utc::now(),
+                            created_by: user_name.clone(),
+                        });
+                        updated = true;
+                    }
+                }
+                for dep_id in remove_dependency {
+                    // Remove any dependency on this ID
+                    let initial_len = issue.dependencies.len();
+                    issue.dependencies.retain(|d| d.depends_on_id != dep_id);
+                    if issue.dependencies.len() != initial_len {
+                        updated = true;
+                    }
+                }
+
                 if updated {
                     issue.updated_at = Utc::now();
-                    store.update_issue(&issue).context("Failed to update issue")?;
+                    store
+                        .update_issue(&issue)
+                        .context("Failed to update issue")?;
                     println!("Updated issue {}", issue.id);
                 } else {
                     println!("No changes provided.");
@@ -247,12 +354,23 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Edit { id } => {
             if let Some(mut issue) = store.get_issue(&id)? {
+                let user_name = store.get_config("user.name")?.unwrap_or_else(|| "unknown".to_string());
+
                 let frontmatter = IssueFrontmatter {
                     title: issue.title.clone(),
                     status: issue.status.clone(),
                     priority: issue.priority,
                     issue_type: issue.issue_type.clone(),
                     assignee: issue.assignee.clone(),
+                    labels: issue.labels.clone(),
+                    dependencies: issue
+                        .dependencies
+                        .iter()
+                        .map(|d| FrontmatterDependency {
+                            id: d.depends_on_id.clone(),
+                            dep_type: d.type_.clone(),
+                        })
+                        .collect(),
                 };
 
                 let yaml = serde_yaml::to_string(&frontmatter)?;
@@ -288,6 +406,29 @@ fn main() -> anyhow::Result<()> {
                         issue.assignee = new_fm.assignee;
                         issue.description = body_part;
                         issue.updated_at = Utc::now();
+                        issue.labels = new_fm.labels;
+
+                        // Reconcile dependencies
+                        // Convert new_fm.dependencies (Vec<FrontmatterDependency>) to Vec<Dependency>
+                        // We try to preserve existing metadata if possible.
+                        let mut new_deps = Vec::new();
+                        for fd in new_fm.dependencies {
+                            // Find existing
+                            if let Some(existing) = issue.dependencies.iter().find(|d| d.depends_on_id == fd.id && d.type_ == fd.dep_type) {
+                                new_deps.push(existing.clone());
+                            } else {
+                                // Create new
+                                use beads_core::models::Dependency;
+                                new_deps.push(Dependency {
+                                    issue_id: issue.id.clone(),
+                                    depends_on_id: fd.id,
+                                    type_: fd.dep_type,
+                                    created_at: Utc::now(),
+                                    created_by: user_name.clone(),
+                                });
+                            }
+                        }
+                        issue.dependencies = new_deps;
 
                         store.update_issue(&issue).context("Failed to update issue")?;
                         println!("Updated issue {}", issue.id);
@@ -533,6 +674,8 @@ fn main() -> anyhow::Result<()> {
                     priority,
                     issue_type: type_.clone(),
                     assignee: None,
+                    labels: Vec::new(),
+                    dependencies: Vec::new(),
                 };
 
                 let yaml = serde_yaml::to_string(&frontmatter)?;
@@ -598,8 +741,17 @@ fn main() -> anyhow::Result<()> {
                                     delete_reason: String::new(),
                                     original_type: String::new(),
 
-                                    labels: Vec::new(),
-                                    dependencies: Vec::new(),
+                                    labels: new_fm.labels,
+                                    dependencies: new_fm.dependencies.into_iter().map(|fd| {
+                                        use beads_core::models::Dependency;
+                                        Dependency {
+                                            issue_id: short_id.clone(),
+                                            depends_on_id: fd.id,
+                                            type_: fd.dep_type,
+                                            created_at: now,
+                                            created_by: user.clone(),
+                                        }
+                                    }).collect(),
                                     comments: Vec::new(),
                                 };
                                 store.create_issue(&issue).context("Failed to create issue")?;

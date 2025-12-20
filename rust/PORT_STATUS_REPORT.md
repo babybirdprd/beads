@@ -14,7 +14,7 @@ However, it is **incomplete for advanced users** who rely on labeling or depende
 | **Issue Creation** | ✅ Usable | `bd create` works with interactive and non-interactive modes. |
 | **Issue Listing** | ✅ Usable | `bd list` provides formatted tables with filtering options. |
 | **Issue Details** | ✅ Usable | `bd show` displays full issue details including comments/labels (read-only). |
-| **Issue Updates** | ⚠️ Partial | `bd update` supports status, priority, type, title, description, and assignee. **Missing labels and dependencies.** |
+| Issue Updates | ✅ Usable | `bd update` fully supports modifying all fields including labels and dependencies. |
 | **Synchronization** | ✅ Usable | `bd sync` correctly handles export/import and merge logic. Verified cross-language compatibility. |
 | **Configuration** | ✅ Usable | `bd config` allows setting/getting user preferences. |
 | **Statistics** | ✅ Usable | `bd stats` provides aggregated metrics. |
@@ -27,17 +27,16 @@ The following workflows have been verified to work correctly:
 3.  **Sync**: Committing changes to Git and ensuring the JSONL format is generated correctly.
 4.  **Interoperability**: (Verified via analysis and partial tests) The Rust port respects the same database schema and file formats as the Go version.
 
-## Identified Gaps
+## Resolved Gaps (Fixed)
 
-### 1. Missing Label and Dependency Management
-While the underlying `Store` and `Issue` models support `labels` and `dependencies`, the CLI (`beads-cli`) does not yet expose arguments to modify them.
-*   **Missing**: `bd update --label ...` or `bd label add/remove ...`
-*   **Missing**: `bd update --depends-on ...` or `bd dependency add/remove ...`
-*   **Impact**: Users cannot categorize issues or build the dependency graph using the Rust CLI.
+### 1. Label and Dependency Management
+Implemented CLI support for managing labels and dependencies:
+*   `bd update --add-label <label>` and `--remove-label <label>`
+*   `bd update --add-dependency <id>[:type]` and `--remove-dependency <id>`
 
-### 2. Interactive Editing Limitations
-The interactive editor (`bd edit`) exposes the issue metadata via YAML frontmatter. Currently, this frontmatter includes `title`, `status`, `priority`, `type`, and `assignee`. It **does not** include labels or dependencies, meaning users cannot add them during interactive edits either.
+### 2. Interactive Editing
+The interactive editor (`bd edit`) and `bd create` now include `labels` and `dependencies` in the YAML frontmatter, allowing users to modify them directly in their text editor.
 
 ## Recommendation
 
-The port is ready for "Alpha" release to users who only need basic task tracking (Title/Description/Status). For feature parity with the Go version and to support the intended "Dependency Aware" nature of Beads, **implementing CLI support for labels and dependencies is a critical next step.**
+The port is now fully usable for standard workflows including advanced categorization and dependency management. The next focus should be on WASM compilation and further testing.
