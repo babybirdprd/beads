@@ -1,10 +1,10 @@
 use crate::{Store, GitOps};
-use crate::fs::{FileSystem, StdFileSystem};
+use crate::fs::FileSystem;
 use crate::merge::merge3way;
 use anyhow::{Result, Context, bail};
 use std::path::Path;
 
-pub fn run_sync(store: &mut Store, git: &impl GitOps, git_root: &Path, jsonl_path: &Path, fs: &impl FileSystem) -> Result<()> {
+pub fn run_sync(store: &mut impl Store, git: &impl GitOps, git_root: &Path, jsonl_path: &Path, fs: &impl FileSystem) -> Result<()> {
     // 1. Export
     store.export_to_jsonl(jsonl_path, fs).context("Export failed")?;
 

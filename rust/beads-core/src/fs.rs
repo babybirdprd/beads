@@ -1,6 +1,6 @@
 use std::path::Path;
 use anyhow::Result;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, Write};
 
 pub trait FileSystem {
     fn read_to_string(&self, path: &Path) -> Result<String>;
@@ -12,8 +12,10 @@ pub trait FileSystem {
     fn open_write(&self, path: &Path) -> Result<Box<dyn Write>>;
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct StdFileSystem;
 
+#[cfg(not(target_arch = "wasm32"))]
 impl FileSystem for StdFileSystem {
     fn read_to_string(&self, path: &Path) -> Result<String> {
         Ok(std::fs::read_to_string(path)?)
@@ -39,6 +41,7 @@ impl FileSystem for StdFileSystem {
     }
 
     fn open_read(&self, path: &Path) -> Result<Box<dyn BufRead>> {
+        use std::io::BufReader;
         let file = std::fs::File::open(path)?;
         Ok(Box::new(BufReader::new(file)))
     }

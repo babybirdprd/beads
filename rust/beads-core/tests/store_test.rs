@@ -1,4 +1,4 @@
-use beads_core::{Store, Issue, Dependency, Comment, StdFileSystem};
+use beads_core::{Store, SqliteStore, Issue, Dependency, Comment, StdFileSystem};
 use std::fs;
 use chrono::Utc;
 
@@ -12,7 +12,7 @@ fn test_export_to_jsonl() -> anyhow::Result<()> {
         fs::remove_file(&db_path)?;
     }
 
-    let store = Store::open(&db_path)?;
+    let store = SqliteStore::open(&db_path)?;
 
     // Init Schema (Handled by Store::open)
 
