@@ -1,5 +1,7 @@
 use crate::fs::FileSystem;
-use crate::models::{Comment, Dependency, Issue};
+use crate::models::Issue;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::models::{Comment, Dependency};
 use anyhow::Result;
 use std::path::Path;
 

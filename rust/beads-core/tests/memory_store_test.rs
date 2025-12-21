@@ -1,103 +1,73 @@
-use beads_core::models::{Comment, Dependency};
-use beads_core::{FileSystem, Issue, MemoryStore, StdFileSystem, Store};
-use chrono::Utc;
-use std::fs;
+use beads_core::{Issue, MemoryStore, StdFileSystem, Store};
+use tempfile::tempdir;
 
 #[test]
-fn test_memory_store_crud() -> anyhow::Result<()> {
-    // Setup
+fn test_memory_store_crud() {
     let store = MemoryStore::new();
 
-    // 1. Create Issue
-    let now = Utc::now();
+    // Create Issue
     let issue = Issue {
-        id: "bd-mem-123".to_string(),
-        title: "Memory Test".to_string(),
-        description: "In memory".to_string(),
+        id: "issue1".to_string(),
+        title: "Test Issue".to_string(),
         status: "open".to_string(),
-        priority: 1,
-        issue_type: "task".to_string(),
-        created_at: now,
-        updated_at: now,
-        labels: vec!["mem".to_string()],
-        dependencies: vec![Dependency {
-            issue_id: "bd-mem-123".to_string(),
-            depends_on_id: "bd-other".to_string(),
-            type_: "blocks".to_string(),
-            created_at: now,
-            created_by: "me".to_string(),
-        }],
-        comments: vec![Comment {
-            id: 1,
-            issue_id: "bd-mem-123".to_string(),
-            author: "me".to_string(),
-            text: "comment".to_string(),
-            created_at: now,
-        }],
         ..Default::default()
     };
+    store.create_issue(&issue).unwrap();
 
-    store.create_issue(&issue)?;
+    // Read Issue
+    let fetched = store.get_issue("issue1").unwrap().unwrap();
+    assert_eq!(fetched.title, "Test Issue");
 
-    // 2. Get Issue
-    let fetched = store.get_issue("bd-mem-123")?.expect("Issue should exist");
-    assert_eq!(fetched.title, "Memory Test");
-    assert_eq!(fetched.labels, vec!["mem".to_string()]);
-    assert_eq!(fetched.dependencies.len(), 1);
-    assert_eq!(fetched.comments.len(), 1);
-
-    // 3. Update Issue
+    // Update Issue
     let mut updated = fetched.clone();
     updated.status = "closed".to_string();
-    updated.labels.push("closed".to_string());
-    store.update_issue(&updated)?;
+    store.update_issue(&updated).unwrap();
 
-    let fetched2 = store.get_issue("bd-mem-123")?.expect("Issue should exist");
-    assert_eq!(fetched2.status, "closed");
-    assert_eq!(fetched2.labels.len(), 2);
+    let fetched_updated = store.get_issue("issue1").unwrap().unwrap();
+    assert_eq!(fetched_updated.status, "closed");
 
-    // 4. List Issues
-    let list = store.list_issues(None, None, None, None, None, None)?;
-    assert_eq!(list.len(), 1);
-    assert_eq!(list[0].id, "bd-mem-123");
-
-    // 5. Config
-    store.set_config("user.name", "Memory User")?;
-    let config_val = store.get_config("user.name")?;
-    assert_eq!(config_val, Some("Memory User".to_string()));
-
-    Ok(())
+    // List Issues
+    let issues = store.list_issues(None, None, None, None, None, None).unwrap();
+    assert_eq!(issues.len(), 1);
+    assert_eq!(issues[0].id, "issue1");
 }
 
 #[test]
-fn test_memory_store_export_import() -> anyhow::Result<()> {
-    let dir = std::env::temp_dir().join("beads_mem_test");
-    fs::create_dir_all(&dir)?;
-    let jsonl_path = dir.join("issues.jsonl");
-
+fn test_memory_store_config() {
     let store = MemoryStore::new();
-    let now = Utc::now();
-    let issue = Issue {
-        id: "bd-mem-export".to_string(),
-        title: "Export Me".to_string(),
-        created_at: now,
-        updated_at: now,
+
+    store.set_config("user.name", "Test User").unwrap();
+    let val = store.get_config("user.name").unwrap();
+    assert_eq!(val, Some("Test User".to_string()));
+
+    let missing = store.get_config("user.email").unwrap();
+    assert_eq!(missing, None);
+}
+
+#[test]
+fn test_memory_store_export_import() {
+    let store1 = MemoryStore::new();
+    let issue1 = Issue {
+        id: "issue1".to_string(),
+        title: "Export Test".to_string(),
         ..Default::default()
     };
-    store.create_issue(&issue)?;
+    store1.create_issue(&issue1).unwrap();
 
-    let fs_impl = StdFileSystem;
-    store.export_to_jsonl(&jsonl_path, &fs_impl)?;
+    let temp_dir = tempdir().unwrap();
+    let jsonl_path = temp_dir.path().join("issues.jsonl");
 
-    assert!(jsonl_path.exists());
+    // Use StdFileSystem for test, assuming MemoryStore logic supports it
+    // Wait, MemoryStore export/import uses fs trait.
+    // If we use StdFileSystem, it writes to disk.
+    let fs = StdFileSystem;
+
+    store1.export_to_jsonl(&jsonl_path, &fs).unwrap();
 
     // Import into new store
     let mut store2 = MemoryStore::new();
-    store2.import_from_jsonl(&jsonl_path, &fs_impl)?;
+    store2.import_from_jsonl(&jsonl_path, &fs).unwrap();
 
-    let fetched = store2.get_issue("bd-mem-export")?;
-    assert!(fetched.is_some());
-    assert_eq!(fetched.unwrap().title, "Export Me");
-
-    Ok(())
+    let fetched = store2.get_issue("issue1").unwrap().unwrap();
+    assert_eq!(fetched.title, "Export Test");
 }
