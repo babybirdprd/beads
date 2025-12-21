@@ -91,7 +91,12 @@ enum Commands {
     },
     Onboard,
     Ready,
-    Sync,
+    Sync {
+        #[arg(long)]
+        squash: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
     Stats,
     Config {
         #[command(subcommand)]
@@ -600,14 +605,18 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        Commands::Sync => {
+        Commands::Sync { squash, dry_run } => {
             let beads_dir = db_path.parent().unwrap();
             let git_root = beads_dir.parent().unwrap_or(std::path::Path::new("."));
             let git = beads_core::StdGit::new(git_root);
             let jsonl_path = beads_dir.join("issues.jsonl");
             let fs = StdFileSystem;
-            beads_core::sync::run_sync(&mut store, &git, git_root, &jsonl_path, &fs).context("Sync failed")?;
-            println!("Sync complete.");
+            beads_core::sync::run_sync(&mut store, &git, git_root, &jsonl_path, &fs, squash, dry_run).context("Sync failed")?;
+            if dry_run {
+                println!("Sync complete (dry-run).");
+            } else {
+                println!("Sync complete.");
+            }
         }
         Commands::Stats => {
             let issues = store.list_issues(None, None, None, None, None, None)?;

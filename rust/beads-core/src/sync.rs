@@ -10,11 +10,31 @@ pub fn run_sync(
     git_root: &Path,
     jsonl_path: &Path,
     fs: &impl FileSystem,
+    squash: bool,
+    dry_run: bool,
 ) -> Result<()> {
+    if dry_run {
+        // 1. Export to temp file
+        let temp_dir = std::env::temp_dir();
+        let temp_jsonl = temp_dir.join("issues.jsonl.dry-run");
+        store
+            .export_to_jsonl(&temp_jsonl, fs)
+            .context("Dry-run export failed")?;
+
+        tracing::info!("Dry run: Exported pending changes to {:?}", temp_jsonl);
+        tracing::info!("Dry run: Git operations and import skipped.");
+        return Ok(());
+    }
+
     // 1. Export
     store
         .export_to_jsonl(jsonl_path, fs)
         .context("Export failed")?;
+
+    if squash {
+        tracing::info!("Squash mode: Changes exported to JSONL. Git operations skipped.");
+        return Ok(());
+    }
 
     // 2. Git Add
     git.add(jsonl_path).context("Git add failed")?;
