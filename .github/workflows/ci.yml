@@ -139,6 +139,33 @@ jobs:
         with:
           version: latest
           args: --timeout=5m
+
+  test-rust-compat:
+    name: Test Rust Compat
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      - name: Build Go reference
+        run: go build -v -o bd-go ./cmd/bd
+
+      - name: Build Rust port
+        run: |
+          cd rust
+          cargo build --release
+          cp target/release/bd ../bd-rust
+
+      - name: Verify Compatibility
+        run: ./scripts/verify_compat.sh
+
   test-nix:
     name: Test Nix Flake
     runs-on: ubuntu-latest
