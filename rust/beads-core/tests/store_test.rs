@@ -1,6 +1,6 @@
-use beads_core::{Store, SqliteStore, Issue, Dependency, Comment, StdFileSystem};
-use std::fs;
+use beads_core::{Comment, Dependency, Issue, SqliteStore, StdFileSystem, Store};
 use chrono::Utc;
+use std::fs;
 
 #[test]
 fn test_export_to_jsonl() -> anyhow::Result<()> {

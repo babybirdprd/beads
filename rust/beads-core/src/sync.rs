@@ -1,12 +1,20 @@
-use crate::{Store, GitOps};
 use crate::fs::FileSystem;
 use crate::merge::merge3way;
-use anyhow::{Result, Context, bail};
+use crate::{GitOps, Store};
+use anyhow::{bail, Context, Result};
 use std::path::Path;
 
-pub fn run_sync(store: &mut impl Store, git: &impl GitOps, git_root: &Path, jsonl_path: &Path, fs: &impl FileSystem) -> Result<()> {
+pub fn run_sync(
+    store: &mut impl Store,
+    git: &impl GitOps,
+    git_root: &Path,
+    jsonl_path: &Path,
+    fs: &impl FileSystem,
+) -> Result<()> {
     // 1. Export
-    store.export_to_jsonl(jsonl_path, fs).context("Export failed")?;
+    store
+        .export_to_jsonl(jsonl_path, fs)
+        .context("Export failed")?;
 
     // 2. Git Add
     git.add(jsonl_path).context("Git add failed")?;
@@ -14,7 +22,8 @@ pub fn run_sync(store: &mut impl Store, git: &impl GitOps, git_root: &Path, json
     // 3. Git Commit
     // Check if changes to commit? git commit will fail/no-op if clean.
     // Our Git wrapper returns Ok if clean.
-    git.commit("sync: update issues").context("Git commit failed")?;
+    git.commit("sync: update issues")
+        .context("Git commit failed")?;
 
     // 4. Pull Rebase
     if git.has_remote()? {
@@ -34,7 +43,11 @@ pub fn run_sync(store: &mut impl Store, git: &impl GitOps, git_root: &Path, json
                     // For now, if strip_prefix fails, we assume the user provided path is what git knows
                     // if they are running from git root.
                     // But safer is to bail or try just the filename if it's in root.
-                     bail!("Could not determine relative path of {:?} to git root {:?}", jsonl_path, git_root);
+                    bail!(
+                        "Could not determine relative path of {:?} to git root {:?}",
+                        jsonl_path,
+                        git_root
+                    );
                 }
             };
 
@@ -64,7 +77,7 @@ pub fn run_sync(store: &mut impl Store, git: &impl GitOps, git_root: &Path, json
                     left_path.to_str().unwrap(),
                     right_path.to_str().unwrap(),
                     false,
-                    fs
+                    fs,
                 )?;
 
                 // Add and continue
@@ -85,7 +98,9 @@ pub fn run_sync(store: &mut impl Store, git: &impl GitOps, git_root: &Path, json
     }
 
     // 6. Import changes from JSONL back to DB
-    store.import_from_jsonl(jsonl_path, fs).context("Import failed")?;
+    store
+        .import_from_jsonl(jsonl_path, fs)
+        .context("Import failed")?;
 
     Ok(())
 }

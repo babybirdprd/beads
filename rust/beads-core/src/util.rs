@@ -1,5 +1,5 @@
-use sha2::{Digest, Sha256};
 use chrono::{DateTime, Utc};
+use sha2::{Digest, Sha256};
 
 const BASE36_ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 
@@ -33,10 +33,12 @@ fn encode_base36(data: &[u8], length: usize) -> String {
     // So "000abc"
 
     let mut padded_chars = Vec::new();
-    let needed = if length > chars.len() { length - chars.len() } else { 0 };
-    for _ in 0..needed {
-        padded_chars.push('0');
-    }
+    let needed = if length > chars.len() {
+        length - chars.len()
+    } else {
+        0
+    };
+    padded_chars.extend(std::iter::repeat('0').take(needed));
     padded_chars.extend(chars);
 
     // Truncate to exact length if needed (keep least significant digits / suffix)
@@ -51,11 +53,22 @@ fn encode_base36(data: &[u8], length: usize) -> String {
     }
 }
 
-pub fn generate_hash_id(prefix: &str, title: &str, description: &str, creator: &str, created_at: DateTime<Utc>, length: usize, nonce: usize) -> String {
+pub fn generate_hash_id(
+    prefix: &str,
+    title: &str,
+    description: &str,
+    creator: &str,
+    created_at: DateTime<Utc>,
+    length: usize,
+    nonce: usize,
+) -> String {
     // Go: content := fmt.Sprintf("%s|%s|%s|%d|%d", title, description, creator, timestamp.UnixNano(), nonce)
     let timestamp_nano = created_at.timestamp_nanos_opt().unwrap_or(0);
 
-    let content = format!("{}|{}|{}|{}|{}", title, description, creator, timestamp_nano, nonce);
+    let content = format!(
+        "{}|{}|{}|{}|{}",
+        title, description, creator, timestamp_nano, nonce
+    );
 
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());

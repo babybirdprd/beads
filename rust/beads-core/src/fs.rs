@@ -1,6 +1,6 @@
-use std::path::Path;
 use anyhow::Result;
 use std::io::{BufRead, Write};
+use std::path::Path;
 
 pub trait FileSystem {
     fn read_to_string(&self, path: &Path) -> Result<String>;

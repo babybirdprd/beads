@@ -4,21 +4,37 @@ The Rust port is designed with future WebAssembly (WASM) support in mind. This w
 
 ## Current Status
 
-*   **FileSystem Abstraction**: The `FileSystem` trait in `beads-core` abstracts all file I/O operations (read, write, list, existence check).
+*   **FileSystem Abstraction**: The `FileSystem` trait in `beads-core` abstracts all file I/O operations.
+    *   **Native**: `StdFileSystem` uses `std::fs`.
+    *   **WASM**: `WasmFileSystem` delegates to JavaScript functions via `wasm-bindgen`.
 *   **GitOps Abstraction**: The `GitOps` trait abstracts git commands.
-*   **Store Abstraction**: The `Store` trait in `beads-core` abstracts the persistence layer, allowing different implementations (e.g. SQLite, In-Memory, IndexedDB).
-*   **Core Logic**: The core logic is pure Rust and does not depend on OS-specific features, making it portable.
-*   **Conditional Compilation**: The native implementations `StdFileSystem`, `StdGit`, and `SqliteStore` are guarded by `#[cfg(not(target_arch = "wasm32"))]`, allowing `beads-core` to compile on WASM targets without linking errors.
+    *   **Native**: `StdGit` uses `std::process::Command` to call the `git` binary.
+    *   **WASM**: `WasmGit` delegates to JavaScript functions via `wasm-bindgen`.
+*   **Store Abstraction**: The `Store` trait in `beads-core` abstracts the persistence layer.
+    *   **Native**: `SqliteStore` uses `rusqlite` (SQLite).
+    *   **WASM/All**: `MemoryStore` provides an in-memory implementation suitable for ephemeral sessions or testing.
+*   **Core Logic**: The core logic is pure Rust and does not depend on OS-specific features.
+*   **Compilation**: `beads-core` compiles for `wasm32-unknown-unknown`. Dependencies like `rusqlite` are gated behind `#[cfg(not(target_arch = "wasm32"))]`.
+
+## JavaScript Bindings
+
+The `beads-core` library exposes the following JS bindings when compiled for WASM:
+
+*   **Modules**:
+    *   `/js/beads_fs.js`: Expected to export filesystem functions (`fs_read_to_string`, `fs_write`, etc.).
+    *   `/js/beads_git.js`: Expected to export git functions (`git_init`, `git_commit`, etc.).
+*   **Classes**:
+    *   `WasmFileSystem`: Rust wrapper around the JS filesystem module.
+    *   `WasmGit`: Rust wrapper around the JS git module.
+
+## Usage in WASM
+
+To use Beads in a WASM environment:
+1.  Compile `beads-core` with `wasm-pack`.
+2.  Provide implementations for the functions in `beads_fs.js` and `beads_git.js` in the host environment.
+3.  Instantiate `MemoryStore` or implement a custom `Store` (e.g., on top of IndexedDB).
 
 ## Next Steps
 
-To achieve full WASM support (runtime), the following steps are needed:
-
-1.  **WASM Implementations**:
-    *   **FileSystem**: Implement a `FileSystem` that operates on an in-memory or browser-provided file system (e.g., VS Code FS API).
-    *   **GitOps**: Implement the `GitOps` trait for WASM. This will likely involve interacting with a JavaScript git provider (e.g. isomorphic-git) or a pure-Rust library compatible with WASM.
-    *   **Store**: Implement a WASM-compatible `Store`. This could be an in-memory store for ephemeral sessions, or an adapter for `sqlite-wasm` / IndexedDB for persistence.
-
-2.  **JS/WASM Bindings**:
-    *   Expose the `beads-core` API to JavaScript via `wasm-bindgen`.
-    *   Create a demo or test harness running in a browser environment to verify end-to-end functionality.
+1.  **JS Implementation**: Create a reference implementation of the JS bindings (e.g., using `isomorphic-git` and a browser-fs adapter).
+2.  **End-to-End Test**: Create a browser-based test harness to verify the full flow.

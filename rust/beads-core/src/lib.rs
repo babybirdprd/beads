@@ -1,10 +1,10 @@
-pub mod models;
-pub mod store;
-pub mod util;
+pub mod fs;
 pub mod git;
 pub mod merge;
+pub mod models;
+pub mod store;
 pub mod sync;
-pub mod fs;
+pub mod util;
 
 pub use models::*;
 pub use store::Store;
@@ -19,3 +19,8 @@ pub use git::StdGit;
 pub use fs::FileSystem;
 #[cfg(not(target_arch = "wasm32"))]
 pub use fs::StdFileSystem;
+
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+#[cfg(target_arch = "wasm32")]
+pub use wasm::{WasmFileSystem, WasmGit};
