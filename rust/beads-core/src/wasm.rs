@@ -28,6 +28,7 @@ extern "C" {
     fn git_has_remote() -> bool;
 }
 
+/// FileSystem implementation that delegates to JavaScript.
 #[wasm_bindgen]
 pub struct WasmFileSystem;
 
