@@ -8,5 +8,14 @@ pub mod fs;
 
 pub use models::*;
 pub use store::Store;
-pub use git::{GitOps, StdGit};
-pub use fs::{FileSystem, StdFileSystem};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use store::SqliteStore;
+
+pub use git::GitOps;
+#[cfg(not(target_arch = "wasm32"))]
+pub use git::StdGit;
+
+pub use fs::FileSystem;
+#[cfg(not(target_arch = "wasm32"))]
+pub use fs::StdFileSystem;

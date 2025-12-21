@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use beads_core::{Store, Issue, StdFileSystem};
+use beads_core::{Store, SqliteStore, Issue, StdFileSystem};
 use chrono::Utc;
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
@@ -166,7 +166,7 @@ fn main() -> anyhow::Result<()> {
         }
     }
 
-    let mut store = Store::open(&db_path).map_err(|e| anyhow::anyhow!("Failed to open DB at {:?}: {}", db_path, e))?;
+    let mut store = SqliteStore::open(&db_path).map_err(|e| anyhow::anyhow!("Failed to open DB at {:?}: {}", db_path, e))?;
 
     match cli.command {
         Commands::List { status, assignee, priority, type_, label, sort } => {
@@ -461,12 +461,14 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::Export { output } => {
             let fs = StdFileSystem;
-            store.export_to_jsonl(&output, &fs).context(format!("Failed to export issues to {}", output))?;
+            let output_path = std::path::Path::new(&output);
+            store.export_to_jsonl(output_path, &fs).context(format!("Failed to export issues to {}", output))?;
             println!("Exported issues to {}", output);
         }
         Commands::Import { input } => {
             let fs = StdFileSystem;
-            store.import_from_jsonl(&input, &fs).context(format!("Failed to import issues from {}", input))?;
+            let input_path = std::path::Path::new(&input);
+            store.import_from_jsonl(input_path, &fs).context(format!("Failed to import issues from {}", input))?;
             println!("Imported issues from {}", input);
         }
         Commands::Merge { output, base, left, right, debug } => {
