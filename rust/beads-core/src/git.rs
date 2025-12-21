@@ -1,6 +1,6 @@
-use std::process::Command;
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
-use anyhow::{Result, Context, bail};
+use std::process::Command;
 
 pub trait GitOps {
     fn init(&self) -> Result<()>;
@@ -35,30 +35,39 @@ impl StdGit {
 
 impl GitOps for StdGit {
     fn init(&self) -> Result<()> {
-        let output = self.command(&["init"])
+        let output = self
+            .command(&["init"])
             .output()
             .context("Failed to run git init")?;
 
         if !output.status.success() {
-             bail!("git init failed: {}", String::from_utf8_lossy(&output.stderr));
+            bail!(
+                "git init failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(())
     }
 
     fn add(&self, path: &Path) -> Result<()> {
         let path_s = path.to_string_lossy();
-        let output = self.command(&["add", &path_s])
+        let output = self
+            .command(&["add", &path_s])
             .output()
             .context("Failed to run git add")?;
 
         if !output.status.success() {
-             bail!("git add failed: {}", String::from_utf8_lossy(&output.stderr));
+            bail!(
+                "git add failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(())
     }
 
     fn commit(&self, message: &str) -> Result<()> {
-        let output = self.command(&["commit", "-m", message])
+        let output = self
+            .command(&["commit", "-m", message])
             .output()
             .context("Failed to run git commit")?;
 
@@ -68,76 +77,101 @@ impl GitOps for StdGit {
             if stdout.contains("nothing to commit") || stdout.contains("working tree clean") {
                 return Ok(());
             }
-            bail!("git commit failed: {}\n{}", stdout, String::from_utf8_lossy(&output.stderr));
+            bail!(
+                "git commit failed: {}\n{}",
+                stdout,
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(())
     }
 
     fn pull_rebase(&self) -> Result<()> {
         // pull --rebase
-        let output = self.command(&["pull", "--rebase"])
+        let output = self
+            .command(&["pull", "--rebase"])
             .output()
             .context("Failed to run git pull --rebase")?;
 
         if !output.status.success() {
-             // Return error, caller checks for conflict
-             bail!("git pull --rebase failed: {}", String::from_utf8_lossy(&output.stderr));
+            // Return error, caller checks for conflict
+            bail!(
+                "git pull --rebase failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(())
     }
 
     fn push(&self) -> Result<()> {
-        let output = self.command(&["push"])
+        let output = self
+            .command(&["push"])
             .output()
             .context("Failed to run git push")?;
 
         if !output.status.success() {
-             bail!("git push failed: {}", String::from_utf8_lossy(&output.stderr));
+            bail!(
+                "git push failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(())
     }
 
     fn status(&self) -> Result<String> {
-        let output = self.command(&["status", "--porcelain"])
+        let output = self
+            .command(&["status", "--porcelain"])
             .output()
             .context("Failed to run git status")?;
 
         if !output.status.success() {
-             bail!("git status failed: {}", String::from_utf8_lossy(&output.stderr));
+            bail!(
+                "git status failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(String::from_utf8(output.stdout)?)
     }
 
     fn show(&self, revision: &str) -> Result<String> {
-        let output = self.command(&["show", revision])
+        let output = self
+            .command(&["show", revision])
             .output()
             .context("Failed to run git show")?;
 
         if !output.status.success() {
-             bail!("git show failed: {}", String::from_utf8_lossy(&output.stderr));
+            bail!(
+                "git show failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(String::from_utf8(output.stdout)?)
     }
 
     fn rebase_continue(&self) -> Result<()> {
-        let output = self.command(&["rebase", "--continue"])
+        let output = self
+            .command(&["rebase", "--continue"])
             .env("GIT_EDITOR", "true") // avoid editor opening
             .output()
             .context("Failed to run git rebase --continue")?;
 
         if !output.status.success() {
-             bail!("git rebase --continue failed: {}", String::from_utf8_lossy(&output.stderr));
+            bail!(
+                "git rebase --continue failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
         Ok(())
     }
 
     fn has_remote(&self) -> Result<bool> {
-        let output = self.command(&["remote"])
+        let output = self
+            .command(&["remote"])
             .output()
             .context("Failed to run git remote")?;
 
         if !output.status.success() {
-             return Ok(false);
+            return Ok(false);
         }
         let stdout = String::from_utf8_lossy(&output.stdout);
         Ok(!stdout.trim().is_empty())

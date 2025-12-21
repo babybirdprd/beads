@@ -1,5 +1,5 @@
-use crate::models::{Issue, Dependency, Comment};
 use crate::fs::FileSystem;
+use crate::models::{Comment, Dependency, Issue};
 use anyhow::Result;
 use std::path::Path;
 
@@ -10,9 +10,23 @@ pub trait Store {
     fn list_config(&self) -> Result<Vec<(String, String)>>;
     fn execute_raw(&self, sql: &str) -> Result<()>;
     fn get_issue(&self, id: &str) -> Result<Option<Issue>>;
-    fn list_issues(&self, status: Option<&str>, assignee: Option<&str>, priority: Option<i32>, issue_type: Option<&str>, label: Option<&str>, sort_by: Option<&str>) -> Result<Vec<Issue>>;
+    fn list_issues(
+        &self,
+        status: Option<&str>,
+        assignee: Option<&str>,
+        priority: Option<i32>,
+        issue_type: Option<&str>,
+        label: Option<&str>,
+        sort_by: Option<&str>,
+    ) -> Result<Vec<Issue>>;
     fn import_from_jsonl(&mut self, jsonl_path: &Path, fs: &dyn FileSystem) -> Result<()>;
-    fn generate_unique_id(&self, prefix: &str, title: &str, description: &str, creator: &str) -> Result<String>;
+    fn generate_unique_id(
+        &self,
+        prefix: &str,
+        title: &str,
+        description: &str,
+        creator: &str,
+    ) -> Result<String>;
     fn create_issue(&self, issue: &Issue) -> Result<()>;
     fn export_to_jsonl(&self, jsonl_path: &Path, fs: &dyn FileSystem) -> Result<()>;
 }
@@ -23,12 +37,12 @@ pub use sqlite_impl::SqliteStore;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sqlite_impl {
     use super::*;
-    use rusqlite::{Connection, params};
-    use chrono::{DateTime, Utc, NaiveDateTime};
+    use crate::util;
+    use chrono::{DateTime, NaiveDateTime, Utc};
+    use rusqlite::{params, Connection};
+    use sha2::{Digest, Sha256};
     use std::collections::HashMap;
     use std::io::{BufRead, BufWriter, Write};
-    use sha2::{Digest, Sha256};
-    use crate::util;
 
     pub struct SqliteStore {
         conn: Connection,
@@ -105,12 +119,10 @@ pub mod sqlite_impl {
                     key TEXT PRIMARY KEY,
                     value TEXT
                 );
-                "
+                ",
             )?;
 
-            Ok(SqliteStore {
-                conn,
-            })
+            Ok(SqliteStore { conn })
         }
 
         fn export_all_issues(&self) -> Result<Vec<Issue>> {
@@ -127,7 +139,7 @@ pub mod sqlite_impl {
                     sender, ephemeral, replies_to, relates_to, duplicate_of, superseded_by,
                     deleted_at, deleted_by, delete_reason, original_type
                 FROM issues
-                ORDER BY id"
+                ORDER BY id",
             )?;
 
             let issue_iter = stmt.query_map([], |row| {
@@ -207,7 +219,7 @@ pub mod sqlite_impl {
 
         fn get_all_dependencies(&self) -> Result<HashMap<String, Vec<Dependency>>> {
             let mut stmt = self.conn.prepare(
-                "SELECT issue_id, depends_on_id, type, created_at, created_by FROM dependencies"
+                "SELECT issue_id, depends_on_id, type, created_at, created_by FROM dependencies",
             )?;
             let rows = stmt.query_map([], |row| {
                 let created_at_s: String = row.get(3)?;
@@ -231,9 +243,9 @@ pub mod sqlite_impl {
         }
 
         fn get_all_comments(&self) -> Result<HashMap<String, Vec<Comment>>> {
-            let mut stmt = self.conn.prepare(
-                "SELECT id, issue_id, author, text, created_at FROM comments"
-            )?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id, issue_id, author, text, created_at FROM comments")?;
             let rows = stmt.query_map([], |row| {
                 let created_at_s: String = row.get(4)?;
                 let created_at = parse_timestamp(&created_at_s).unwrap_or_else(|| Utc::now());
@@ -250,7 +262,9 @@ pub mod sqlite_impl {
             let mut map: HashMap<String, Vec<Comment>> = HashMap::new();
             for row in rows {
                 let comment = row?;
-                map.entry(comment.issue_id.clone()).or_default().push(comment);
+                map.entry(comment.issue_id.clone())
+                    .or_default()
+                    .push(comment);
             }
             Ok(map)
         }
@@ -258,7 +272,9 @@ pub mod sqlite_impl {
 
     impl Store for SqliteStore {
         fn get_config(&self, key: &str) -> Result<Option<String>> {
-            let mut stmt = self.conn.prepare("SELECT value FROM config WHERE key = ?1")?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT value FROM config WHERE key = ?1")?;
             let mut rows = stmt.query([key])?;
             if let Some(row) = rows.next()? {
                 Ok(Some(row.get(0)?))
@@ -316,7 +332,8 @@ pub mod sqlite_impl {
             )?;
 
             // Replace labels
-            self.conn.execute("DELETE FROM labels WHERE issue_id = ?1", params![&issue.id])?;
+            self.conn
+                .execute("DELETE FROM labels WHERE issue_id = ?1", params![&issue.id])?;
             for label in &issue.labels {
                 self.conn.execute(
                     "INSERT INTO labels (issue_id, label) VALUES (?1, ?2)",
@@ -325,7 +342,10 @@ pub mod sqlite_impl {
             }
 
             // Replace dependencies
-            self.conn.execute("DELETE FROM dependencies WHERE issue_id = ?1", params![&issue.id])?;
+            self.conn.execute(
+                "DELETE FROM dependencies WHERE issue_id = ?1",
+                params![&issue.id],
+            )?;
             for dep in &issue.dependencies {
                 self.conn.execute(
                     "INSERT INTO dependencies (issue_id, depends_on_id, type, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -342,10 +362,10 @@ pub mod sqlite_impl {
         }
 
         fn list_config(&self) -> Result<Vec<(String, String)>> {
-            let mut stmt = self.conn.prepare("SELECT key, value FROM config ORDER BY key")?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?;
+            let mut stmt = self
+                .conn
+                .prepare("SELECT key, value FROM config ORDER BY key")?;
+            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
 
             let mut result = Vec::new();
             for row in rows {
@@ -376,7 +396,7 @@ pub mod sqlite_impl {
                     deleted_at, deleted_by, delete_reason, original_type
                 FROM issues
                 WHERE id LIKE ?1
-                LIMIT 1"
+                LIMIT 1",
             )?;
 
             let mut rows = stmt.query([&query_id])?;
@@ -391,7 +411,9 @@ pub mod sqlite_impl {
 
             // Fetch children
             let mut labels = Vec::new();
-            let mut labels_stmt = self.conn.prepare("SELECT label FROM labels WHERE issue_id = ?1")?;
+            let mut labels_stmt = self
+                .conn
+                .prepare("SELECT label FROM labels WHERE issue_id = ?1")?;
             let labels_rows = labels_stmt.query_map([&id], |r| r.get(0))?;
             for l in labels_rows {
                 labels.push(l?);
@@ -481,7 +503,15 @@ pub mod sqlite_impl {
             }))
         }
 
-        fn list_issues(&self, status: Option<&str>, assignee: Option<&str>, priority: Option<i32>, issue_type: Option<&str>, label: Option<&str>, sort_by: Option<&str>) -> Result<Vec<Issue>> {
+        fn list_issues(
+            &self,
+            status: Option<&str>,
+            assignee: Option<&str>,
+            priority: Option<i32>,
+            issue_type: Option<&str>,
+            label: Option<&str>,
+            sort_by: Option<&str>,
+        ) -> Result<Vec<Issue>> {
             let mut conditions = Vec::new();
             let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
 
@@ -645,7 +675,10 @@ pub mod sqlite_impl {
                     )?;
                 }
 
-                tx.execute("DELETE FROM dependencies WHERE issue_id = ?1", params![&issue.id])?;
+                tx.execute(
+                    "DELETE FROM dependencies WHERE issue_id = ?1",
+                    params![&issue.id],
+                )?;
                 for dep in &issue.dependencies {
                     tx.execute(
                         "INSERT INTO dependencies (issue_id, depends_on_id, type, created_at, created_by) VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -653,7 +686,8 @@ pub mod sqlite_impl {
                     )?;
                 }
 
-                let mut stmt = tx.prepare_cached("SELECT author, text FROM comments WHERE issue_id = ?1")?;
+                let mut stmt =
+                    tx.prepare_cached("SELECT author, text FROM comments WHERE issue_id = ?1")?;
                 let existing_comments: std::collections::HashSet<(String, String)> = stmt
                     .query_map([&issue.id], |row| Ok((row.get(0)?, row.get(1)?)))?
                     .filter_map(Result::ok)
@@ -661,7 +695,8 @@ pub mod sqlite_impl {
                 drop(stmt);
 
                 for comment in &issue.comments {
-                    if !existing_comments.contains(&(comment.author.clone(), comment.text.clone())) {
+                    if !existing_comments.contains(&(comment.author.clone(), comment.text.clone()))
+                    {
                         tx.execute(
                             "INSERT INTO comments (issue_id, author, text, created_at) VALUES (?1, ?2, ?3, ?4)",
                             params![&issue.id, &comment.author, &comment.text, comment.created_at.to_rfc3339()],
@@ -674,14 +709,28 @@ pub mod sqlite_impl {
             Ok(())
         }
 
-        fn generate_unique_id(&self, prefix: &str, title: &str, description: &str, creator: &str) -> Result<String> {
+        fn generate_unique_id(
+            &self,
+            prefix: &str,
+            title: &str,
+            description: &str,
+            creator: &str,
+        ) -> Result<String> {
             let created_at = Utc::now();
             let base_length = 6;
             let max_length = 8;
 
             for length in base_length..=max_length {
                 for nonce in 0..10 {
-                    let candidate = util::generate_hash_id(prefix, title, description, creator, created_at, length, nonce);
+                    let candidate = util::generate_hash_id(
+                        prefix,
+                        title,
+                        description,
+                        creator,
+                        created_at,
+                        length,
+                        nonce,
+                    );
                     let count: i64 = self.conn.query_row(
                         "SELECT COUNT(*) FROM issues WHERE id = ?1",
                         params![&candidate],
@@ -693,7 +742,9 @@ pub mod sqlite_impl {
                     }
                 }
             }
-            Err(anyhow::anyhow!("Failed to generate unique ID after retries"))
+            Err(anyhow::anyhow!(
+                "Failed to generate unique ID after retries"
+            ))
         }
 
         fn create_issue(&self, issue: &Issue) -> Result<()> {

@@ -1,9 +1,9 @@
-use anyhow::{Result, Context};
-use crate::models::{Issue, Dependency, Comment};
 use crate::fs::FileSystem;
-use std::io::{BufWriter, BufRead, Write};
+use crate::models::{Comment, Dependency, Issue};
+use anyhow::{Context, Result};
+use chrono::{DateTime, Duration, Utc};
 use std::collections::{HashMap, HashSet};
-use chrono::{DateTime, Utc, Duration};
+use std::io::{BufRead, BufWriter, Write};
 use std::path::Path;
 
 const STATUS_TOMBSTONE: &str = "tombstone";
@@ -31,7 +31,14 @@ struct IssueKey {
                     // So models::Issue::sender is the one.
 }
 
-pub fn merge3way(output_path: &str, base_path: &str, left_path: &str, right_path: &str, debug: bool, fs: &impl FileSystem) -> Result<()> {
+pub fn merge3way(
+    output_path: &str,
+    base_path: &str,
+    left_path: &str,
+    right_path: &str,
+    debug: bool,
+    fs: &impl FileSystem,
+) -> Result<()> {
     if debug {
         eprintln!("=== DEBUG MODE ===");
         eprintln!("Output path: {}", output_path);
@@ -62,7 +69,9 @@ pub fn merge3way(output_path: &str, base_path: &str, left_path: &str, right_path
     }
 
     // Write output
-    let file = fs.open_write(Path::new(output_path)).context("Failed to create output file")?;
+    let file = fs
+        .open_write(Path::new(output_path))
+        .context("Failed to create output file")?;
     let mut writer = BufWriter::new(file);
 
     for issue in result {
@@ -82,7 +91,9 @@ pub fn merge3way(output_path: &str, base_path: &str, left_path: &str, right_path
 }
 
 fn read_issues(path: &str, fs: &impl FileSystem) -> Result<Vec<Issue>> {
-    let reader = fs.open_read(Path::new(path)).context(format!("Failed to open file: {}", path))?;
+    let reader = fs
+        .open_read(Path::new(path))
+        .context(format!("Failed to open file: {}", path))?;
     let mut issues = Vec::new();
 
     for line in reader.lines() {
@@ -118,7 +129,11 @@ fn is_expired_tombstone(issue: &Issue, ttl_days: i64) -> bool {
         None => return false,
     };
 
-    let ttl = if ttl_days == 0 { DEFAULT_TOMBSTONE_TTL_DAYS } else { ttl_days };
+    let ttl = if ttl_days == 0 {
+        DEFAULT_TOMBSTONE_TTL_DAYS
+    } else {
+        ttl_days
+    };
 
     // Add grace period
     let effective_ttl = Duration::days(ttl) + Duration::hours(CLOCK_SKEW_GRACE_HOURS);
@@ -129,7 +144,9 @@ fn is_expired_tombstone(issue: &Issue, ttl_days: i64) -> bool {
 
 fn merge_logic(base: Vec<Issue>, left: Vec<Issue>, right: Vec<Issue>) -> (Vec<Issue>, Vec<String>) {
     let mut base_map: HashMap<IssueKey, Issue> = HashMap::new();
-    for i in base { base_map.insert(make_key(&i), i); }
+    for i in base {
+        base_map.insert(make_key(&i), i);
+    }
 
     let mut left_map: HashMap<IssueKey, Issue> = HashMap::new();
     let mut left_by_id: HashMap<String, Issue> = HashMap::new();
@@ -322,8 +339,20 @@ fn merge_issue(base: Issue, left: Issue, right: Issue) -> (Issue, String) {
     let mut result = base.clone();
 
     // Merge fields
-    result.title = merge_field_by_updated_at(&base.title, &left.title, &right.title, &left.updated_at, &right.updated_at);
-    result.description = merge_field_by_updated_at(&base.description, &left.description, &right.description, &left.updated_at, &right.updated_at);
+    result.title = merge_field_by_updated_at(
+        &base.title,
+        &left.title,
+        &right.title,
+        &left.updated_at,
+        &right.updated_at,
+    );
+    result.description = merge_field_by_updated_at(
+        &base.description,
+        &left.description,
+        &right.description,
+        &left.updated_at,
+        &right.updated_at,
+    );
     result.notes = merge_notes(&base.notes, &left.notes, &right.notes);
     result.status = merge_status(&base.status, &left.status, &right.status);
     result.priority = merge_priority(base.priority, left.priority, right.priority);
@@ -374,7 +403,13 @@ fn merge_field(base: &str, left: &str, right: &str) -> String {
     left.to_string()
 }
 
-fn merge_field_by_updated_at(base: &str, left: &str, right: &str, left_updated: &DateTime<Utc>, right_updated: &DateTime<Utc>) -> String {
+fn merge_field_by_updated_at(
+    base: &str,
+    left: &str,
+    right: &str,
+    left_updated: &DateTime<Utc>,
+    right_updated: &DateTime<Utc>,
+) -> String {
     if base == left && base != right {
         return right.to_string();
     }
@@ -400,8 +435,12 @@ fn merge_notes(base: &str, left: &str, right: &str) -> String {
     if left == right {
         return left.to_string();
     }
-    if left.is_empty() { return right.to_string(); }
-    if right.is_empty() { return left.to_string(); }
+    if left.is_empty() {
+        return right.to_string();
+    }
+    if right.is_empty() {
+        return left.to_string();
+    }
     format!("{}\n\n---\n\n{}", left, right)
 }
 
@@ -416,14 +455,26 @@ fn merge_status(base: &str, left: &str, right: &str) -> String {
 }
 
 fn merge_priority(base: i32, left: i32, right: i32) -> i32 {
-    if base == left && base != right { return right; }
-    if base == right && base != left { return left; }
-    if left == right { return left; }
+    if base == left && base != right {
+        return right;
+    }
+    if base == right && base != left {
+        return left;
+    }
+    if left == right {
+        return left;
+    }
 
-    if left == 0 && right != 0 { return right; }
-    if right == 0 && left != 0 { return left; }
+    if left == 0 && right != 0 {
+        return right;
+    }
+    if right == 0 && left != 0 {
+        return left;
+    }
 
-    if left < right { return left; } // Lower is more urgent
+    if left < right {
+        return left;
+    } // Lower is more urgent
     right
 }
 
@@ -437,7 +488,11 @@ fn is_time_after(t1: Option<DateTime<Utc>>, t2: Option<DateTime<Utc>>) -> bool {
 }
 
 fn max_time(t1: DateTime<Utc>, t2: DateTime<Utc>) -> DateTime<Utc> {
-    if t1 > t2 { t1 } else { t2 }
+    if t1 > t2 {
+        t1
+    } else {
+        t2
+    }
 }
 
 fn max_time_opt(t1: Option<DateTime<Utc>>, t2: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
