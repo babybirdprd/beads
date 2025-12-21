@@ -5,6 +5,7 @@ use std::io::{BufRead, Cursor, Write};
 use std::path::Path;
 use wasm_bindgen::prelude::*;
 
+// JS bindings for beads-core
 #[wasm_bindgen(module = "/js/beads_fs.js")]
 extern "C" {
     fn fs_read_to_string(path: &str) -> String;
