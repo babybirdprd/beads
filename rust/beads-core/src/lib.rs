@@ -20,6 +20,9 @@ pub use fs::FileSystem;
 #[cfg(not(target_arch = "wasm32"))]
 pub use fs::StdFileSystem;
 
+pub mod memory_store;
+pub use memory_store::MemoryStore;
+
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 #[cfg(target_arch = "wasm32")]

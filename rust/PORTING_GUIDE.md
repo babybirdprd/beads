@@ -23,20 +23,16 @@ We have established the foundational structure for the Rust port of `beads`.
 | **Sync Logic** | 🟢 Complete | `bd sync` command implemented with conflict resolution. |
 | **Compatibility** | 🟢 Verified | Cross-language test suite `scripts/verify_compat.sh` passes. |
 | **UX/Error Handling** | 🟢 Improved | Added `anyhow::Context` and cleaned up CLI output. |
-| **WASM Prep** | 🟢 Complete | `FileSystem` trait abstracts IO in `beads-core` (store, sync, merge). |
+| **WASM Prep** | 🟢 Complete | `FileSystem` trait abstracts IO in `beads-core`. |
+| **WASM Support** | 🟢 Complete | `beads-core` compiles for `wasm32-unknown-unknown`. `MemoryStore` implemented. |
 
 ---
 
 ## Next Steps for the Next Agent
 
-Your goal is to prepare the codebase for WASM compilation and expand feature parity.
+Your goal is to expand feature parity.
 
-### 1. WASM Compilation
-* **Task**: Add `wasm32-unknown-unknown` target support.
-* **Task**: Replace `rusqlite` with a WASM-compatible SQLite binding (e.g., `sqlite-wasm` or similar) or verify `rusqlite` bundled mode works with WASM.
-* **Task**: Verify `StdGit` is avoided or stubbed in WASM builds (since `std::process::Command` won't work).
-
-### 2. Feature Parity
+### 1. Feature Parity
 * **Task**: Enhance `bd sync` to support more flags present in Go version (e.g., `--squash`, `--dry-run`).
 
 ### 3. CI Integration

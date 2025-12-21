@@ -21,8 +21,8 @@ The Rust port is designed with future WebAssembly (WASM) support in mind. This w
 The `beads-core` library exposes the following JS bindings when compiled for WASM:
 
 *   **Modules**:
-    *   `/js/beads_fs.js`: Expected to export filesystem functions (`fs_read_to_string`, `fs_write`, etc.).
-    *   `/js/beads_git.js`: Expected to export git functions (`git_init`, `git_commit`, etc.).
+    *   `/js/beads_fs.js`: Exports filesystem functions (`fs_read_to_string`, `fs_write`, etc.). Reference mock implementations are provided in the source tree.
+    *   `/js/beads_git.js`: Exports git functions (`git_init`, `git_commit`, etc.). Reference mock implementations are provided in the source tree.
 *   **Classes**:
     *   `WasmFileSystem`: Rust wrapper around the JS filesystem module.
     *   `WasmGit`: Rust wrapper around the JS git module.
@@ -34,7 +34,11 @@ To use Beads in a WASM environment:
 2.  Provide implementations for the functions in `beads_fs.js` and `beads_git.js` in the host environment.
 3.  Instantiate `MemoryStore` or implement a custom `Store` (e.g., on top of IndexedDB).
 
-## Next Steps
+## Testing
 
-1.  **JS Implementation**: Create a reference implementation of the JS bindings (e.g., using `isomorphic-git` and a browser-fs adapter).
-2.  **End-to-End Test**: Create a browser-based test harness to verify the full flow.
+A basic browser-based test harness is available in `rust/wasm-test/`.
+To run it:
+1.  Install `wasm-pack` (`cargo install wasm-pack`).
+2.  Build the WASM package: `cd rust/beads-core && wasm-pack build --target web --out-dir ../wasm-test/pkg`.
+3.  Serve `rust/wasm-test/` (e.g., `python3 -m http.server`).
+4.  Open browser to verify console output.
